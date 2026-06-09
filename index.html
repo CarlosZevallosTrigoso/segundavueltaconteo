@@ -512,7 +512,8 @@ function detalleGeoSection(s){
       scopeName='TOTAL '+(node?.nombre||node?.code||''); scopeCands=node?metrics(node).c:[]; scopePct=node?node.pctActas:null; scopeDelta=node?deltaVotos(node):null; }
     else { const blk = ambito===1? s.peru : s.exterior;
       scopeName = ambito===1? 'TOTAL Perú' : 'TOTAL Exterior';
-      scopeCands = blk? reales(blk.candidatos) : []; scopePct = blk? totView(blk.totales).pct : null;
+      scopeCands = blk ? candList(blk.candidatos).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0)) : [];
+      scopePct = blk? totView(blk.totales).pct : null;
       if(hasPrev){ scopeDelta=0; regs.filter(r=>r.ambito===ambito&&r.level==='dep').forEach(r=>{ const dd=deltaVotos(r); if(dd!=null) scopeDelta+=dd; }); } }
     const tFind = nm => scopeCands.find(c=>c.nombre===nm);
     const tCells = candNames.map(nm=>{ const c=tFind(nm); return `<td class="num">${c&&c.votos!=null?fmt(c.votos):'—'}</td>`; }).join('');
