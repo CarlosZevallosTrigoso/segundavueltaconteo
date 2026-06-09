@@ -132,12 +132,14 @@
 </div>
 
 <script>
-/* ---------- mapa de ubigeos nivel-01 (depto) + exterior ---------- */
+/* ---------- códigos de región: ORDEN INTERNO ONPE (no INEI) ----------
+   nivel01//10000 -> 1..25 (alfabético, Callao=24) ; 91..95 = exterior.
+   Derivado de la huella de #provincias por departamento del corte real. */
 const DEPT = {
   '01':'Amazonas','02':'Áncash','03':'Apurímac','04':'Arequipa','05':'Ayacucho','06':'Cajamarca',
-  '07':'Callao','08':'Cusco','09':'Huancavelica','10':'Huánuco','11':'Ica','12':'Junín','13':'La Libertad',
-  '14':'Lambayeque','15':'Lima','16':'Loreto','17':'Madre de Dios','18':'Moquegua','19':'Pasco','20':'Piura',
-  '21':'Puno','22':'San Martín','23':'Tacna','24':'Tumbes','25':'Ucayali',
+  '07':'Cusco','08':'Huancavelica','09':'Huánuco','10':'Ica','11':'Junín','12':'La Libertad',
+  '13':'Lambayeque','14':'Lima','15':'Loreto','16':'Madre de Dios','17':'Moquegua','18':'Pasco',
+  '19':'Piura','20':'Puno','21':'San Martín','22':'Tacna','23':'Tumbes','24':'Callao','25':'Ucayali',
   '91':'Exterior · África','92':'Exterior · América','93':'Exterior · Asia','94':'Exterior · Europa','95':'Exterior · Oceanía'
 };
 const regionName = (code) => DEPT[String(code).slice(0,2)] || ('ubigeo '+code);
@@ -154,13 +156,13 @@ const pct = (n,d=3) => n==null? '—' : n.toFixed(d)+'%';
 const esc = (s) => String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 function normCand(c){
-  const nombre = c.nombreCandidato ?? c.nombre ?? c.candidato ?? c.nombreAgrupacionPolitica ?? '?';
+  const agrupacion = c.nombreAgrupacionPolitica ?? c.agrupacion ?? '';
+  const nombre = (c.nombreCandidato || c.nombre || c.candidato || agrupacion || '?');
   return {
-    nombre,
-    agrupacion: c.nombreAgrupacionPolitica ?? c.agrupacion ?? '',
-    votos: num(c.votos,c.votosObtenidos,c.totalVotos,c.cantidadVotos,c.numeroVotos),
+    nombre, agrupacion,
+    votos: num(c.totalVotosValidos,c.votos,c.votosObtenidos,c.totalVotos,c.cantidadVotos,c.numeroVotos),
     pct: num(c.porcentajeVotosValidos,c.porcentaje,c.porcentajeValidos),
-    especial: /blanco|nulo|viciad/i.test(String(nombre)),
+    especial: /blanco|nulo|viciad/i.test(nombre+' '+agrupacion),
   };
 }
 const candList = (arr) => (Array.isArray(arr)? arr : []).map(normCand);
@@ -170,22 +172,36 @@ function totView(t){
   if(!t || t._error) return {error:t&&t._error};
   return {
     pct: num(t.actasContabilizadas), cont: num(t.contabilizadas), total: num(t.totalActas),
-    jee: num(t.actasEnviadasJee), particip: num(t.participacionCiudadana), raw:t
+    jee: num(t.actasEnviadasJee), jeeN: num(t.enviadasJee), pendJeeN: num(t.pendientesJee),
+    particip: num(t.participacionCiudadana),
+    emitidos: num(t.totalVotosEmitidos), validos: num(t.totalVotosValidos), raw:t
   };
 }
+// fila de mapa-calor: granularidad provincia. ubigeo entero DDPPDD; depto = floor(/10000)
 function normHeat(e){
-  const code = e.ubigeo ?? e.idUbigeo ?? e.codigoUbigeo ?? e.codigo ?? e.id ?? e.ubigeoNivel01;
-  const cands = candList(e.candidatos || e.participantes);
+  const deptInt = e.ubigeoNivel01;
+  const code = (deptInt!=null)? String(Math.floor(deptInt/10000)).padStart(2,'0') : null;
   return {
-    code: code!=null? String(code): null,
-    cont: num(e.contabilizadas, e.actasContabilizadas_n, e.numActas),
-    pct: num(e.actasContabilizadas, e.porcentajeActas),
-    total: num(e.totalActas),
-    cands: cands.filter(c=>!c.especial),
+    code,                                              // depto: '01'..'25','91'..'95'
+    prov: e.ubigeoNivel02!=null? String(e.ubigeoNivel02): null,
+    ambito: e.ambitoGeografico,
+    cont: num(e.actasContabilizadas, e.contabilizadas), // en heat ESTE es el conteo
+    pct: num(e.porcentajeActasContabilizadas),
+    cands: [],                                          // mapa-calor no trae votos por candidato
     raw:e
   };
 }
 const heatArr = (h) => (Array.isArray(h)? h : []).map(normHeat).filter(x=>x.code);
+// agrega provincias a nivel departamento
+function heatByDept(rows){
+  const m={};
+  for(const r of rows){
+    if(r.code==null) continue;
+    if(!m[r.code]) m[r.code]={code:r.code, ambito:r.ambito, cont:0, provs:0};
+    m[r.code].cont += r.cont||0; m[r.code].provs++;
+  }
+  return Object.values(m);
+}
 
 /* candidato -> color, estable por agrupacion conocida o por orden */
 function candColor(name, agr, idx){
@@ -237,8 +253,9 @@ function kpiSection(s){
     ${kpi(t.pct!=null? t.pct.toFixed(3):'—', '%', 'Actas contabilizadas')}
     ${kpi(fmt(t.cont), ' / '+fmt(t.total), 'Actas (conteo / total)')}
     ${kpi(fmt(falta), ' actas', 'Faltan por contabilizar', true)}
-    ${kpi(t.particip!=null? t.particip.toFixed(2):'—', '%', 'Participación')}
-    ${kpi(t.jee!=null? t.jee.toFixed(3):'—', '%', 'Actas enviadas al JEE')}`;
+    ${kpi(fmt(t.jeeN), ' actas', 'En el JEE (observadas)')}
+    ${kpi(fmt(t.pendJeeN), ' actas', 'Pendientes')}
+    ${kpi(t.particip!=null? t.particip.toFixed(2):'—', '%', 'Participación')}`;
   sec.appendChild(g);
   if(t.error){ const n=el('p','note err'); n.textContent='totales nacionales: '+t.error; sec.appendChild(n); }
   return sec;
@@ -323,75 +340,49 @@ function renderDiff(host, A, B, sumEl){
   const ga=gapOf(A), gb=gapOf(B);
   const dGap=(ga&&gb)? gb.gap-ga.gap : null;
   if(sumEl) sumEl.innerHTML = dCont!=null
-    ? `· +${fmt(dCont)} actas nuevas${dGap!=null? ` · margen movió ${dGap>=0?'+':''}${fmt(dGap)} para ${esc((dGap>=0?gb:gb).lead)}`:''}`
+    ? `· +${fmt(dCont)} actas nuevas${dGap!=null? ` · ventaja de ${esc(gb.lead)} ${dGap>=0?'creció':'cayó'} ${fmt(Math.abs(dGap))}`:''}`
     : '';
-  // por departamento
   const ha={}, hb={};
-  heatArr(A.heatDepartamentos).forEach(h=>ha[h.code]=h);
-  heatArr(B.heatDepartamentos).forEach(h=>hb[h.code]=h);
+  heatByDept(heatArr(A.heatDepartamentos)).forEach(h=>ha[h.code]=h);
+  heatByDept(heatArr(B.heatDepartamentos)).forEach(h=>hb[h.code]=h);
   const codes=[...new Set([...Object.keys(ha),...Object.keys(hb)])];
-  const hasVotes = codes.some(c=> (hb[c]?.cands||[]).length>=2);
   const rows=codes.map(code=>{
     const a=ha[code], b=hb[code];
     const dc=(b?.cont!=null&&a?.cont!=null)? b.cont-a.cont : (b?.cont??null);
-    let dv1=null,dv2=null,leadNm='';
-    if(hasVotes && b?.cands?.length>=2){
-      const bs=[...b.cands].sort((x,y)=>(y.votos??0)-(x.votos??0));
-      const as=a?.cands? Object.fromEntries(a.cands.map(c=>[c.nombre,c.votos??0])):{};
-      dv1=(bs[0].votos??0)-(as[bs[0].nombre]??0);
-      dv2=(bs[1].votos??0)-(as[bs[1].nombre]??0);
-      leadNm=bs[0].nombre;
-    }
-    return {code,dc,dv1,dv2,leadNm};
-  }).filter(r=>r.dc!=null && r.dc!==0).sort((a,b)=>(b.dc||0)-(a.dc||0));
-
-  if(!codes.length){ const p=el('p','note err'); p.textContent='Sin datos de mapa-calor por departamento en estos cortes (revisa el panel de inspección para ver el esquema real).'; host.appendChild(p); return; }
-  if(!rows.length){ const p=el('p','note'); p.textContent='No hubo nuevas actas por departamento entre estos dos cortes.'; host.appendChild(p); return; }
-
+    return {code,dc};
+  }).filter(r=>r.dc!=null && r.dc!==0).sort((x,y)=>(y.dc||0)-(x.dc||0));
+  if(!codes.length){ const p=el('p','note err'); p.textContent='Sin mapa-calor por región en estos cortes (mira el panel de inspección).'; host.appendChild(p); return; }
+  if(!rows.length){ const p=el('p','note'); p.textContent='No entraron actas nuevas por región entre estos dos cortes.'; host.appendChild(p); return; }
   const tbl=el('table');
-  tbl.innerHTML=`<thead><tr><th>Departamento</th><th class="num">+ actas</th>${hasVotes?`<th class="num">Δ puntero</th><th class="num">Δ segundo</th><th>Empujó a</th>`:''}</tr></thead>
+  tbl.innerHTML=`<thead><tr><th>Departamento</th><th class="num">+ actas</th></tr></thead>
     <tbody>${rows.map(r=>`<tr>
       <td>${esc(regionName(r.code))} <span class="pill">${r.code}</span></td>
-      <td class="num up">+${fmt(r.dc)}</td>
-      ${hasVotes?`<td class="num">${r.dv1>=0?'+':''}${fmt(r.dv1)}</td>
-        <td class="num">${r.dv2>=0?'+':''}${fmt(r.dv2)}</td>
-        <td>${esc(r.leadNm)}</td>`:''}
-    </tr>`).join('')}</tbody>`;
+      <td class="num up">+${fmt(r.dc)}</td></tr>`).join('')}</tbody>`;
   host.appendChild(tbl);
-  if(!hasVotes){ const p=el('p','note'); p.textContent='El mapa-calor de estos cortes no trajo votos por candidato; se muestra solo el avance de actas. Si me pasas el esquema real, agrego la atribución de votos por región.'; host.appendChild(p); }
+  const p=el('p','note'); p.textContent='El mapa-calor da cobertura de actas por región, no votos por candidato: esta tabla muestra de dónde entraron las actas, no hacia quién. La dirección del voto se lee en el bloque Perú / Exterior y en la evolución del margen.'; host.appendChild(p);
 }
 
 function regionSection(s){
   const sec=el('section'); sec.innerHTML='<h2>Por región · último corte</h2>';
-  const heat=heatArr(s.heatDepartamentos);
-  if(!heat.length){
-    // fallback: Perú vs Exterior desde los bloques de ámbito
-    const t=el('div'); t.appendChild(ambitoTable(s)); sec.appendChild(t); return sec;
-  }
-  const tabs=el('div','tabs');
-  tabs.innerHTML=`<button class="on" data-f="all">Todo</button><button data-f="peru">Perú</button><button data-f="ext">Exterior</button>`;
-  const host=el('div'); sec.appendChild(tabs); sec.appendChild(host);
   sec.appendChild(ambitoTable(s));
+  const depts=heatByDept(heatArr(s.heatDepartamentos));
+  if(!depts.length) return sec;
+  const tabs=el('div','tabs'); tabs.style.marginTop='18px';
+  tabs.innerHTML=`<button class="on" data-f="peru">Perú</button><button data-f="ext">Exterior</button><button data-f="all">Todo</button>`;
+  const host=el('div'); sec.appendChild(tabs); sec.appendChild(host);
   const draw=(f)=>{
     host.innerHTML='';
-    const rows=heat.filter(h=> f==='all'? true : f==='ext'? /^9/.test(h.code) : !/^9/.test(h.code))
+    const rows=depts.filter(h=> f==='all'? true : f==='ext'? /^9/.test(h.code) : !/^9/.test(h.code))
       .sort((a,b)=>(b.cont??0)-(a.cont??0));
-    const hasVotes=rows.some(r=>r.cands.length>=2);
     const tbl=el('table');
-    tbl.innerHTML=`<thead><tr><th>Región</th><th class="num">% actas</th><th class="num">contab.</th>${hasVotes?'<th>Puntero</th><th class="num">margen</th>':''}</tr></thead>
-      <tbody>${rows.map(r=>{
-        let lead='',mg='';
-        if(r.cands.length>=2){const c=[...r.cands].sort((x,y)=>(y.votos??0)-(x.votos??0));
-          lead=`<span class="${candColor(c[0].nombre,c[0].agrupacion,0)==='var(--a)'?'lead-a':'lead-b'}">${esc(c[0].nombre)}</span>`;
-          mg=fmt((c[0].votos??0)-(c[1].votos??0));}
-        return `<tr><td>${esc(regionName(r.code))} <span class="pill">${r.code}</span></td>
-          <td class="num">${r.pct!=null?r.pct.toFixed(2):'—'}</td><td class="num">${fmt(r.cont)}</td>
-          ${hasVotes?`<td>${lead}</td><td class="num">${mg}</td>`:''}</tr>`;}).join('')}</tbody>`;
+    tbl.innerHTML=`<thead><tr><th>Región</th><th class="num">actas contab.</th><th class="num">provincias</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr><td>${esc(regionName(r.code))} <span class="pill">${r.code}</span></td>
+        <td class="num">${fmt(r.cont)}</td><td class="num">${r.provs}</td></tr>`).join('')}</tbody>`;
     host.appendChild(tbl);
   };
   tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     tabs.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); draw(b.dataset.f);});
-  draw('all');
+  draw('peru');
   return sec;
 }
 
