@@ -111,7 +111,7 @@
   </header>
 
   <div class="drop" id="drop">
-    <p>Los cortes se cargan solos desde la carpeta <code>snapshots/</code>. Captura nuevos con el script de consola.</p>
+    <p>Carga sola los <code>onpe_*.json</code> de la carpeta <code>snapshots/</code> (los descubre vía la API de GitHub). Solo commitea cada corte; sin manifest ni serie.</p>
     <div class="btns">
       <button id="copyCap">Copiar script de captura</button>
       <button class="primary" id="reload">Recargar snapshots</button>
@@ -421,18 +421,41 @@ function rawSection(s){
 
 function el(tag,cls){ const e=document.createElement(tag); if(cls)e.className=cls; return e; }
 
-/* ---------- GitHub Pages: carga automática desde snapshots/ ---------- */
+/* ---------- carga automática desde snapshots/ ----------
+   1) En GitHub Pages: lista la carpeta vía API pública de GitHub y carga
+      todos los onpe_*.json (sin manifest ni serie: solo commitea el archivo).
+   2) Fallback: serie.json, luego manifest.json (útil en local/file://). */
 const SNAP_DIR='snapshots/';
-function loadData(){
-  fetch(SNAP_DIR+'manifest.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(m=>{
-    if(m){
+function ghContext(){
+  const m=location.hostname.match(/^([^.]+)\.github\.io$/);
+  if(!m) return null;
+  const repo=location.pathname.split('/').filter(Boolean)[0];
+  return repo? {user:m[1], repo} : null;   // project page
+}
+function tryIndexFiles(){
+  return fetch(SNAP_DIR+'serie.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
+    if(s){ ingest([s]); return; }
+    return fetch(SNAP_DIR+'manifest.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(m=>{
+      if(!m) return;
       const files=Array.isArray(m)? m : (m.files||[]);
       return Promise.all(files.map(f=>fetch(SNAP_DIR+f,{cache:'no-store'}).then(r=>r.ok?r.json():null)))
         .then(arr=>ingest(arr.filter(Boolean)));
-    }
-    // sin manifest: intenta una serie única en snapshots/serie.json
-    return fetch(SNAP_DIR+'serie.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{ if(s) ingest([s]); });
-  }).catch(()=>{});
+    });
+  });
+}
+function loadData(){
+  const gh=ghContext();
+  if(!gh){ tryIndexFiles().catch(()=>{}); return; }
+  fetch(`https://api.github.com/repos/${gh.user}/${gh.repo}/contents/snapshots?ref=main`,{cache:'no-store'})
+    .then(r=>r.ok?r.json():Promise.reject())
+    .then(list=>{
+      if(!Array.isArray(list)) return Promise.reject();
+      const files=list.filter(f=>f.type==='file' && /^onpe_.*\.json$/i.test(f.name));
+      if(!files.length) return tryIndexFiles();
+      return Promise.all(files.map(f=>fetch(f.download_url,{cache:'no-store'}).then(r=>r.ok?r.json():null)))
+        .then(arr=>ingest(arr.filter(Boolean)));
+    })
+    .catch(()=> tryIndexFiles().catch(()=>{}));
 }
 document.getElementById('reload').onclick=loadData;
 loadData();
