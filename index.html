@@ -107,6 +107,10 @@
   table.geo th.on{color:var(--ink)}
   .pll{font-size:10px;color:var(--muted)}
   table.geo tr.totalrow td{font-weight:600;background:var(--soft);border-bottom:2px solid var(--line)}
+  .geo-ctrl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:10px}
+  .geo-ctrl button.ref{font-size:12px;padding:4px 10px}
+  .geo-ctrl button.ref.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .geo-ctrl .ctrl-chk{display:inline-flex;align-items:center;gap:5px;cursor:pointer;margin-left:6px}
 </style>
 </head>
 <body>
@@ -431,39 +435,55 @@ function detalleGeoSection(s){
   const regs=s.regiones;
   const byCode={}; regs.forEach(r=>byCode[r.code]=r);
   const childrenOf=(ambito,parent)=>regs.filter(r=>r.ambito===ambito && (r.parent||null)===(parent||null));
-  let ambito=1, path=[], sortKey='votos0', sortDir=-1, query='';
 
-  // delta de votos vs el corte anterior (para el "+ votos")
+  // candidatos canónicos (orden estable) + especiales, desde el bloque nacional
+  const mainCands = candList(s.nacional?.candidatos).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0));
+  const candNames = mainCands.map(c=>c.nombre);
+  const specialAgr = [...new Set(candList(s.nacional?.candidatos).filter(c=>c.especial).map(c=>c.agrupacion))];
+  const spLabel = a => /nulo|viciad/i.test(a)?'Nulos' : /blanco/i.test(a)?'Blancos' : a;
+
+  let ambito=1, path=[], sortKey='votos0', sortDir=-1, query='', refIdx=0, showSpecial=false;
+
   const prev = SNAPS[SNAPS.length-2];
   const hasPrev = !!(prev && Array.isArray(prev.regiones) && prev.regiones.length);
   const sumVotos = r => (r.candidatos||[]).filter(c=>!c.especial).reduce((a,c)=>a+(c.votos||0),0);
-  const prevTot = {};
-  if(hasPrev) prev.regiones.forEach(r=>{ prevTot[r.code]=sumVotos(r); });
-  const deltaVotos = r => hasPrev && prevTot[r.code]!=null ? sumVotos(r)-prevTot[r.code] : null;
+  const prevTot = {}; if(hasPrev) prev.regiones.forEach(r=>{ prevTot[r.code]=sumVotos(r); });
+  const deltaVotos = r => hasPrev && r && prevTot[r.code]!=null ? sumVotos(r)-prevTot[r.code] : null;
 
   const tabs=el('div','tabs');
   tabs.innerHTML=`<button class="on" data-a="1">Nacional</button><button data-a="2">Internacional</button>`;
   const crumb=el('div','crumb');
+  const ctrl=el('div','geo-ctrl');
   const search=el('input'); search.type='search'; search.placeholder='Buscar región…'; search.className='geo-search';
   const host=el('div');
-  sec.append(tabs, crumb, search, host);
+  sec.append(tabs, crumb, ctrl, search, host);
 
   const plurals  = a => a===1? ['Departamentos','Provincias','Distritos'] : ['Continentes','Países','Ciudades'];
   const singular = a => a===1? ['Departamento','Provincia','Distrito']  : ['Continente','País','Ciudad'];
   const levelLabel=()=> plurals(ambito)[path.length] || 'Regiones';
   const colName  =()=> singular(ambito)[path.length] || 'Región';
-  const reales = r => (r.candidatos||[]).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0));
-  const metrics = r => { const c=reales(r); return { c, lead:c[0], gap:(c[0]&&c[1])?((c[0].votos??0)-(c[1].votos??0)):null }; };
+  const realesArr = r => (r.candidatos||[]).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0));
+  const findCand = (r,nm) => (r.candidatos||[]).find(x=>x.nombre===nm && !x.especial);
+  const findSpecial = (r,agr) => (r.candidatos||[]).find(x=>x.especial && x.agrupacion===agr);
   const drillable = r => childrenOf(ambito, r.code).length>0;
+  const signedMargin = r => { const ref=findCand(r,candNames[refIdx]), oth=findCand(r,candNames[1-refIdx]);
+    return (ref&&oth&&ref.votos!=null&&oth.votos!=null)? (ref.votos-oth.votos) : null; };
 
-  function currentRows(){
-    const parent = path.length? path[path.length-1].code : null;
-    let rows = childrenOf(ambito, parent);
+  function currentRows(){ const parent=path.length? path[path.length-1].code:null;
+    let rows=childrenOf(ambito,parent);
     if(query){ const q=query.toLowerCase(); rows=rows.filter(r=>String(r.nombre||r.code).toLowerCase().includes(q)); }
-    return rows;
+    return rows; }
+
+  function drawControls(){
+    ctrl.innerHTML=`<span>Margen a favor de:</span>`+
+      candNames.map((nm,i)=>`<button class="ref${refIdx===i?' on':''}" data-ref="${i}">${esc(shortName(nm))}</button>`).join('')+
+      (specialAgr.length? `<label class="ctrl-chk"><input type="checkbox" id="spChk" ${showSpecial?'checked':''}> blancos/nulos</label>`:'');
+    ctrl.querySelectorAll('button.ref').forEach(b=>b.onclick=()=>{ refIdx=+b.dataset.ref; sortKey='margen'; sortDir=-1; draw(); });
+    const chk=ctrl.querySelector('#spChk'); if(chk) chk.onchange=()=>{ showSpecial=chk.checked; draw(); };
   }
 
   function draw(){
+    drawControls();
     crumb.innerHTML='';
     const root=el('span','crumb-link'); root.textContent= ambito===1?'Perú':'Exterior';
     root.onclick=()=>{ path=[]; draw(); }; crumb.appendChild(root);
@@ -472,57 +492,50 @@ function detalleGeoSection(s){
     crumb.appendChild(document.createTextNode('   ·   '+levelLabel()));
 
     const rows=currentRows();
-    let candNames=[]; for(const r of rows){ const m=metrics(r); if(m.c.length>=2){ candNames=m.c.map(c=>c.nombre); break; } }
-
-    const cVotos = (r,i)=>{ const nm=candNames[i]; const c=(r.candidatos||[]).find(x=>x.nombre===nm); return c? (c.votos??-1) : -1; };
-    const val=(r)=>{ const m=metrics(r);
+    const val=(r)=>{
       if(sortKey==='nombre') return String(r.nombre||r.code);
       if(sortKey==='pct')    return r.pctActas??-1;
       if(sortKey==='delta')  return deltaVotos(r)??-Infinity;
-      if(sortKey==='margen') return m.gap??-1;
-      if(sortKey==='lead')   return m.lead? shortName(m.lead) : '';
-      if(sortKey.startsWith('votos')) return cVotos(r, +sortKey.slice(5)||0);
+      if(sortKey==='margen') return signedMargin(r)??-Infinity;
+      if(sortKey==='lead'){ const c=realesArr(r)[0]; return c?shortName(c):''; }
+      if(sortKey.startsWith('votos')){ const c=findCand(r,candNames[+sortKey.slice(5)||0]); return c?(c.votos??-1):-1; }
+      if(sortKey.startsWith('sp')){ const c=findSpecial(r,specialAgr[+sortKey.slice(2)||0]); return c?(c.votos??-1):-1; }
       return 0; };
     const sorted=[...rows].sort((x,y)=>{ const a=val(x),b=val(y);
       return (typeof a==='string')? sortDir*a.localeCompare(b) : sortDir*((a??0)-(b??0)); });
 
     const th=(k,lbl,cls)=>`<th class="${cls||''} sortable${sortKey===k?' on':''}" data-k="${k}">${lbl}${sortKey===k?(sortDir<0?' ▾':' ▴'):''}</th>`;
-    let head=`<tr>${th('nombre', colName())}${th('pct','% actas','num')}`;
+    let head=`<tr>${th('nombre',colName())}${th('pct','% actas','num')}`;
     candNames.forEach((nm,i)=>{ head+=th('votos'+i, shortName(nm), 'num'); });
-    head+=`${th('margen','margen','num')}${th('lead','beneficiado')}`;
+    if(showSpecial) specialAgr.forEach((agr,i)=>{ head+=th('sp'+i, spLabel(agr), 'num'); });
+    head+=th('margen','margen →'+shortName(candNames[refIdx]),'num')+th('lead','beneficiado');
     if(hasPrev) head+=th('delta','+ votos','num');
     head+='</tr>';
 
-    const body=sorted.map(r=>{ const m=metrics(r);
-      const cells=candNames.map(nm=>{ const c=(r.candidatos||[]).find(x=>x.nombre===nm);
+    // celdas comunes (vale para filas normales y total): votos reales, especiales, margen firmado, beneficiado, delta
+    const dataCells=(r, deltaOverride)=>{
+      const cells=candNames.map(nm=>{ const c=findCand(r,nm);
         return `<td class="num">${c&&c.votos!=null?fmt(c.votos):'—'}${c&&c.pct!=null?` <span class="pll">${c.pct.toFixed(1)}%</span>`:''}</td>`; }).join('');
-      const nm = drillable(r)
-        ? `<span class="crumb-link" data-code="${r.code}">${esc(r.nombre||r.code)}</span>`
-        : esc(r.nombre||r.code);
-      const dv = deltaVotos(r);
-      const dCell = hasPrev ? `<td class="num ${dv>0?'up':(dv<0?'down':'')}">${dv==null?'—':(dv>0?'+'+fmt(dv):fmt(dv))}</td>` : '';
-      return `<tr><td>${nm} <span class="pill">${r.code}</span></td>
-        <td class="num">${r.pctActas!=null?r.pctActas.toFixed(1):'—'}</td>${cells}
-        <td class="num">${m.gap!=null?fmt(m.gap):'—'}</td>
-        <td>${m.lead?esc(shortName(m.lead)):'—'}</td>${dCell}</tr>`; }).join('');
+      const sp= showSpecial? specialAgr.map(agr=>{ const c=findSpecial(r,agr); return `<td class="num">${c&&c.votos!=null?fmt(c.votos):'—'}</td>`; }).join('') : '';
+      const sm=signedMargin(r);
+      const mCell=`<td class="num ${sm>0?'up':(sm<0?'down':'')}">${sm==null?'—':(sm>0?'+'+fmt(sm):fmt(sm))}</td>`;
+      const lead=realesArr(r)[0];
+      const dv = deltaOverride!==undefined? deltaOverride : deltaVotos(r);
+      const dCell=hasPrev? `<td class="num ${dv>0?'up':(dv<0?'down':'')}">${dv==null?'—':(dv>0?'+'+fmt(dv):fmt(dv))}</td>`:'';
+      return cells+sp+mCell+`<td>${lead?esc(shortName(lead)):'—'}</td>`+dCell;
+    };
 
-    // fila de totales del ámbito/región actual
-    let scopeName, scopeCands, scopePct, scopeDelta=null;
-    if(path.length){ const node=byCode[path[path.length-1].code];
-      scopeName='TOTAL '+(node?.nombre||node?.code||''); scopeCands=node?metrics(node).c:[]; scopePct=node?node.pctActas:null; scopeDelta=node?deltaVotos(node):null; }
-    else { const blk = ambito===1? s.peru : s.exterior;
-      scopeName = ambito===1? 'TOTAL Perú' : 'TOTAL Exterior';
-      scopeCands = blk ? candList(blk.candidatos).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0)) : [];
-      scopePct = blk? totView(blk.totales).pct : null;
-      if(hasPrev){ scopeDelta=0; regs.filter(r=>r.ambito===ambito&&r.level==='dep').forEach(r=>{ const dd=deltaVotos(r); if(dd!=null) scopeDelta+=dd; }); } }
-    const tFind = nm => scopeCands.find(c=>c.nombre===nm);
-    const tCells = candNames.map(nm=>{ const c=tFind(nm); return `<td class="num">${c&&c.votos!=null?fmt(c.votos):'—'}</td>`; }).join('');
-    const tGap = (scopeCands[0]&&scopeCands[1])? (scopeCands[0].votos??0)-(scopeCands[1].votos??0) : null;
-    const tDeltaCell = hasPrev ? `<td class="num ${scopeDelta>0?'up':''}">${scopeDelta==null?'—':(scopeDelta>0?'+'+fmt(scopeDelta):fmt(scopeDelta))}</td>` : '';
-    const totalRow = `<tr class="totalrow"><td>${esc(scopeName)}</td>
-      <td class="num">${scopePct!=null?scopePct.toFixed(1):'—'}</td>${tCells}
-      <td class="num">${tGap!=null?fmt(tGap):'—'}</td>
-      <td>${scopeCands[0]?esc(shortName(scopeCands[0])):'—'}</td>${tDeltaCell}</tr>`;
+    const body=sorted.map(r=>{
+      const nm = drillable(r)? `<span class="crumb-link" data-code="${r.code}">${esc(r.nombre||r.code)}</span>` : esc(r.nombre||r.code);
+      return `<tr><td>${nm} <span class="pill">${r.code}</span></td><td class="num">${r.pctActas!=null?r.pctActas.toFixed(1):'—'}</td>${dataCells(r)}</tr>`; }).join('');
+
+    // fila TOTAL del ámbito/región actual
+    let scopeNode, scopeName, scopePct, scopeDelta;
+    if(path.length){ scopeNode=byCode[path[path.length-1].code]; scopeName='TOTAL '+(scopeNode?.nombre||scopeNode?.code||''); scopePct=scopeNode?scopeNode.pctActas:null; scopeDelta=deltaVotos(scopeNode); }
+    else { const blk=ambito===1?s.peru:s.exterior; scopeName=ambito===1?'TOTAL Perú':'TOTAL Exterior'; scopePct=blk?totView(blk.totales).pct:null;
+      scopeNode = { code:'', nombre:scopeName, pctActas:scopePct, candidatos: blk? candList(blk.candidatos) : [] };
+      scopeDelta=null; if(hasPrev){ scopeDelta=0; regs.filter(r=>r.ambito===ambito&&r.level==='dep').forEach(r=>{ const dd=deltaVotos(r); if(dd!=null) scopeDelta+=dd; }); } }
+    const totalRow=`<tr class="totalrow"><td>${esc(scopeName)}</td><td class="num">${scopePct!=null?scopePct.toFixed(1):'—'}</td>${dataCells(scopeNode, scopeDelta)}</tr>`;
 
     host.innerHTML=`<table class="geo"><thead>${head}</thead><tbody>${totalRow}${body||'<tr><td>Sin datos en este nivel.</td></tr>'}</tbody></table>`;
     host.querySelectorAll('th.sortable').forEach(h=>h.onclick=()=>{ const k=h.dataset.k;
