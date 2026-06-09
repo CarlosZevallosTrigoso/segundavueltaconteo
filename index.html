@@ -556,29 +556,27 @@ function ultimosVotosSection(){
   const v2=SNAPS.filter(s=>Array.isArray(s.regiones)&&s.regiones.length);
   if(v2.length<2){ const p=el('p','note'); p.textContent='Necesito ≥2 cortes con detalle por región para ver de dónde llegaron los votos.'; sec.appendChild(p); return sec; }
   const win=v2.slice(-5), first=win[0], last=win[win.length-1];
-  // votos por departamento y candidato en cada corte
   const depMap=s=>{ const m={}; s.regiones.filter(r=>r.level==='dep').forEach(r=>{
       const reales=(r.candidatos||[]).filter(c=>!c.especial);
       const o={nombre:r.nombre, ambito:r.ambito, total:0, byCand:{}};
       reales.forEach(c=>{ const k=shortName(c); o.byCand[k]=(o.byCand[k]||0)+(c.votos||0); o.total+=(c.votos||0); });
       m[r.code]=o; }); return m; };
   const A=depMap(first), B=depMap(last);
-  const rows=Object.keys(B).map(code=>{
-    const dTotal=(B[code].total||0)-((A[code]&&A[code].total)||0);
-    const cands={}; Object.keys(B[code].byCand).forEach(nm=>{ cands[nm]=(B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0); });
-    return {code, nombre:B[code].nombre, ambito:B[code].ambito, dTotal, cands};
-  }).filter(r=>r.dTotal>0).sort((x,y)=>y.dTotal-x.dTotal).slice(0,10);
-  const totalNuevos=rows.reduce((a,r)=>a+r.dTotal,0);
+  const build=(ambito)=> Object.keys(B).filter(code=>B[code].ambito===ambito).map(code=>{
+      const dTotal=(B[code].total||0)-((A[code]&&A[code].total)||0);
+      const cands={}; Object.keys(B[code].byCand).forEach(nm=>{ cands[nm]=(B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0); });
+      return {code, nombre:B[code].nombre, dTotal, cands};
+    }).filter(r=>r.dTotal>0).sort((x,y)=>y.dTotal-x.dTotal).slice(0,8);
   const span=`${win.length} cortes · ${first.capturedAt.slice(11,16)} → ${last.capturedAt.slice(11,16)} UTC`;
-  if(!rows.length){ const p=el('p','note'); p.textContent='No entraron votos nuevos en la ventana reciente ('+span+').'; sec.appendChild(p); return sec; }
+  const sgn=v=>v==null?'—':(v>=0?'+':'')+fmt(v);
+  const tbl=(title, rows)=> !rows.length
+    ? `<div class="note" style="margin:8px 0 2px">${title}: sin votos nuevos en la ventana.</div>`
+    : `<div class="eyebrow" style="margin:12px 0 4px">${title} · +${fmt(rows.reduce((a,r)=>a+r.dTotal,0))} votos nuevos</div>
+       <table><thead><tr><th>Región</th><th class="num">+ votos</th><th class="num">→ Sánchez</th><th class="num">→ Fujimori</th></tr></thead>
+       <tbody>${rows.map(r=>`<tr><td>${esc(r.nombre||r.code)}</td><td class="num up">+${fmt(r.dTotal)}</td>
+         <td class="num">${sgn(r.cands['Sánchez'])}</td><td class="num">${sgn(r.cands['Fujimori'])}</td></tr>`).join('')}</tbody></table>`;
   const box=el('div','margin');
-  box.innerHTML=`<div class="note" style="margin:0 0 10px">Ventana: ${span} · <b>+${fmt(totalNuevos)}</b> votos nuevos en total</div>
-    <table><thead><tr><th>Región</th><th class="num">+ votos</th><th class="num">→ Sánchez</th><th class="num">→ Fujimori</th></tr></thead>
-    <tbody>${rows.map(r=>{ const sg=r.cands['Sánchez'], fg=r.cands['Fujimori'];
-      const sgn=v=>v==null?'—':(v>=0?'+':'')+fmt(v);
-      return `<tr><td>${esc(r.nombre||r.code)} ${r.ambito===2?'<span class="pill">ext</span>':''}</td>
-        <td class="num up">+${fmt(r.dTotal)}</td>
-        <td class="num">${sgn(sg)}</td><td class="num">${sgn(fg)}</td></tr>`; }).join('')}</tbody></table>`;
+  box.innerHTML=`<div class="note" style="margin:0 0 4px">Ventana: ${span}</div>`+ tbl('Perú', build(1)) + tbl('Exterior', build(2));
   sec.appendChild(box);
   return sec;
 }
