@@ -268,7 +268,7 @@ function render(){
   if(SNAPS.some(s=>Array.isArray(s.regiones)&&s.regiones.length)) app.appendChild(ultimosVotosSection());
   if(SNAPS.length>=2) app.appendChild(timelineSection());
   app.appendChild(diffSection());
-  if(Array.isArray(latest.regiones) && latest.regiones.length) app.appendChild(detalleGeoSection(latest));
+  if(Array.isArray(latest.regiones) && latest.regiones.length){ app.appendChild(detalleGeoSection(latest)); app.appendChild(faltanActasSection(latest)); }
   else app.appendChild(regionSection(latest));
   app.appendChild(rawSection(latest));
 }
@@ -607,6 +607,86 @@ function ultimosVotosSection(){
     d.style.margin='6px 0'; d.style.borderTop='1px solid var(--line)'; d.style.paddingTop='6px';
     sec.appendChild(d);
   }
+  return sec;
+}
+
+function faltanActasSection(s){
+  const sec=el('section'); sec.innerHTML='<h2>Dónde faltan actas</h2>';
+  const regs=Array.isArray(s.regiones)?s.regiones:[];
+  if(!regs.length){ const p=el('p','note'); p.textContent='Necesito un corte con detalle por región.'; sec.appendChild(p); return sec; }
+
+  // votos válidos por acta (Perú) para la proyección
+  const pt=s.peru?.totales||{};
+  const vpa=(num(pt.totalVotosValidos)&&pt.contabilizadas)? num(pt.totalVotosValidos)/pt.contabilizadas : 200;
+
+  // faltan por región: total≈cont/(pct/100); faltan=total-cont. Para 'dep' se agregan las provincias hijas.
+  const childrenByParent={}; regs.forEach(r=>{ const k=r.parent||''; (childrenByParent[k]=childrenByParent[k]||[]).push(r); });
+  const ownFaltan=r=>{ const c=r.contActas,p=r.pctActas; if(c==null||!p||p<=0) return null; const t=c/(p/100); return {cont:c,total:t,faltan:Math.max(0,t-c)}; };
+  const faltanOf=r=>{
+    if(r.level==='dep'){ const kids=(childrenByParent[r.code]||[]).filter(k=>k.level==='prov');
+      let c=0,t=0,any=false; kids.forEach(k=>{ const f=ownFaltan(k); if(f){any=true;c+=f.cont;t+=f.total;} });
+      return any?{cont:c,total:t,faltan:Math.max(0,t-c)}:null; }
+    return ownFaltan(r);
+  };
+  // inclinación actual de la región (de sus propios candidatos)
+  const leanOf=r=>{ let S=null,F=null; (r.candidatos||[]).forEach(c=>{ if(c.especial) return; const k=shortName(c); if(k==='Sánchez')S=c; if(k==='Fujimori')F=c; });
+    return { S:S?num(S.pct):null, F:F?num(F.pct):null }; };
+
+  let ambito=1, level='dep', proj=false, sortKey='faltan', sortDir=-1;
+  const niv={1:{dep:'Departamento',prov:'Provincia',dist:'Distrito'},2:{dep:'Continente',prov:'País',dist:'Ciudad'}};
+
+  const ctl=el('div'); ctl.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px';
+  ctl.innerHTML=`<div class="tabs" data-g="amb"><button data-a="1" class="on">Perú</button><button data-a="2">Internacional</button></div>
+    <div class="tabs" data-g="lvl"><button data-l="dep" class="on">Departamento</button><button data-l="prov">Provincia</button><button data-l="dist">Distrito</button></div>
+    <label class="note" style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="fproj"> proyección neta (estimada)</label>`;
+  sec.appendChild(ctl);
+  const sumBox=el('div','note'); sumBox.style.margin='0 0 8px'; sec.appendChild(sumBox);
+  const host=el('div'); sec.appendChild(host);
+  const cav=el('p','note'); cav.style.cssText='margin:10px 0 0;font-size:.82em;opacity:.8';
+  cav.textContent='Faltan = actas totales − contabilizadas (totales estimadas de la cobertura por región; el agregado nacional cuadra exacto). Incluye actas observadas en el JEE, de resolución incierta. La proyección neta supone que lo pendiente rompe como lo ya contado y usa ~'+vpa.toFixed(0)+' votos válidos por acta; los distritos rezagados suelen ser los más remotos o disputados, así que tómala como indicio, no pronóstico.';
+  sec.appendChild(cav);
+
+  function draw(){
+    const lvlName=niv[ambito][level];
+    let rows=regs.filter(r=>r.ambito===ambito && r.level===level).map(r=>{
+      const f=faltanOf(r), ln=leanOf(r);
+      const netS=(f&&ln.S!=null&&ln.F!=null)? f.faltan*vpa*(ln.S-ln.F)/100 : null;
+      return { nombre:r.nombre, code:r.code, cont:f?f.cont:null, total:f?f.total:null, faltan:f?f.faltan:null,
+               pct:(f&&f.total>0)?f.cont/f.total*100:null, S:ln.S, F:ln.F, netS };
+    }).filter(r=>r.faltan!=null && r.faltan>0.5);
+    const val=r=>({faltan:r.faltan??-1, pct:r.pct??-1, neto:Math.abs(r.netS??0), nombre:r.nombre||''})[sortKey];
+    rows.sort((a,b)=>{ const x=val(a),y=val(b); if(typeof x==='string') return sortDir*x.localeCompare(y); return sortDir*((x>y?1:x<y?-1:0)); });
+
+    const totFaltan=rows.reduce((a,r)=>a+(r.faltan||0),0);
+    const totNet=rows.reduce((a,r)=>a+(r.netS||0),0);
+    const leader=totNet>=0?'Sánchez':'Fujimori';
+    sumBox.innerHTML=`En ${ambito===1?'Perú':'el exterior'}: <b>${rows.length}</b> ${lvlName.toLowerCase()}s con actas pendientes · <b>${fmt(Math.round(totFaltan))}</b> actas por contar`+
+      (proj?` · proyección neta ≈ <b>${leader} +${fmt(Math.abs(Math.round(totNet)))}</b> votos`:'');
+
+    const arrow=k=>sortKey===k?(sortDir<0?' ▾':' ▴'):'';
+    const th=(k,label,cls)=>`<th class="${cls||''} sortable" data-k="${k}" style="cursor:pointer">${label}${arrow(k)}</th>`;
+    const netCell=r=> r.netS==null?'—':`${r.netS>=0?'Sánchez':'Fujimori'} +${fmt(Math.abs(Math.round(r.netS)))}`;
+    host.innerHTML=`<table><thead><tr>
+        <th>${lvlName}</th>${th('pct','%actas','num')}
+        <th class="num">contadas / totales</th>${th('faltan','faltan','num')}
+        <th class="num">va ganando</th>${proj?th('neto','proy. neta','num'):''}
+      </tr></thead><tbody>${rows.map(r=>{
+        const lead=(r.S!=null&&r.F!=null)?(r.S>=r.F?`Sánchez ${r.S.toFixed(1)}%`:`Fujimori ${r.F.toFixed(1)}%`):'—';
+        return `<tr><td>${esc(r.nombre||r.code)}</td>
+          <td class="num">${r.pct!=null?r.pct.toFixed(1):'—'}</td>
+          <td class="num">${fmt(Math.round(r.cont))} / ${fmt(Math.round(r.total))}</td>
+          <td class="num"><b>${fmt(Math.round(r.faltan))}</b></td>
+          <td class="num">${lead}</td>${proj?`<td class="num">${netCell(r)}</td>`:''}</tr>`;
+      }).join('')||`<tr><td colspan="6" class="note">Sin actas pendientes en este nivel.</td></tr>`}</tbody></table>`;
+    host.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{ const k=th.dataset.k;
+      if(sortKey===k) sortDir*=-1; else { sortKey=k; sortDir=(k==='nombre')?1:-1; } draw(); });
+  }
+  ctl.querySelector('[data-g="amb"]').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
+    ctl.querySelectorAll('[data-g="amb"] button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); ambito=+b.dataset.a; draw(); };
+  ctl.querySelector('[data-g="lvl"]').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
+    ctl.querySelectorAll('[data-g="lvl"] button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); level=b.dataset.l; draw(); };
+  ctl.querySelector('#fproj').onchange=e=>{ proj=e.target.checked; draw(); };
+  draw();
   return sec;
 }
 
