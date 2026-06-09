@@ -98,6 +98,14 @@
   .err{color:var(--warn)}
   footer{margin-top:50px;font-family:var(--mono);font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}
   @media(prefers-reduced-motion:no-preference){.bar i{transition:width .5s ease}}
+  .crumb{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:8px}
+  .crumb-link{color:var(--accent);cursor:pointer}
+  .crumb-link:hover{text-decoration:underline}
+  .geo-search{font-family:var(--mono);font-size:12px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;width:220px;margin-bottom:10px}
+  table.geo th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  table.geo th.sortable:hover{color:var(--ink)}
+  table.geo th.on{color:var(--ink)}
+  .pll{font-size:10px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -240,7 +248,8 @@ function render(){
   app.appendChild(marginSection(latest));
   if(SNAPS.length>=2) app.appendChild(timelineSection());
   app.appendChild(diffSection());
-  app.appendChild(regionSection(latest));
+  if(Array.isArray(latest.regiones) && latest.regiones.length) app.appendChild(detalleGeoSection(latest));
+  else app.appendChild(regionSection(latest));
   app.appendChild(rawSection(latest));
 }
 
@@ -403,6 +412,87 @@ function ambitoTable(s){
   return box;
 }
 
+function detalleGeoSection(s){
+  const sec=el('section'); sec.innerHTML='<h2>Detalle geográfico</h2>';
+  const regs=s.regiones;
+  const byCode={}; regs.forEach(r=>byCode[r.code]=r);
+  const childrenOf=(ambito,parent)=>regs.filter(r=>r.ambito===ambito && (r.parent||null)===(parent||null));
+  let ambito=1, path=[], sortKey='votos0', sortDir=-1, query='';
+
+  const tabs=el('div','tabs');
+  tabs.innerHTML=`<button class="on" data-a="1">Nacional</button><button data-a="2">Internacional</button>`;
+  const crumb=el('div','crumb');
+  const search=el('input'); search.type='search'; search.placeholder='Buscar región…'; search.className='geo-search';
+  const host=el('div');
+  sec.append(tabs, crumb, search, host);
+
+  const labels = a => a===1? ['Departamentos','Provincias','Distritos'] : ['Continentes','Países','Ciudades'];
+  const levelLabel=()=> labels(ambito)[path.length] || 'Regiones';
+  const reales = r => (r.candidatos||[]).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0));
+  const metrics = r => { const c=reales(r); return { c, lead:c[0], gap:(c[0]&&c[1])?((c[0].votos??0)-(c[1].votos??0)):null }; };
+  const drillable = r => childrenOf(ambito, r.code).length>0;
+
+  function currentRows(){
+    const parent = path.length? path[path.length-1].code : null;
+    let rows = childrenOf(ambito, parent);
+    if(query){ const q=query.toLowerCase(); rows=rows.filter(r=>String(r.nombre||r.code).toLowerCase().includes(q)); }
+    return rows;
+  }
+
+  function draw(){
+    // breadcrumb
+    crumb.innerHTML='';
+    const root=el('span','crumb-link'); root.textContent= ambito===1?'Perú':'Exterior';
+    root.onclick=()=>{ path=[]; draw(); }; crumb.appendChild(root);
+    path.forEach((p,i)=>{ crumb.appendChild(document.createTextNode(' › '));
+      const a=el('span','crumb-link'); a.textContent=p.nombre||p.code; a.onclick=()=>{ path=path.slice(0,i+1); draw(); }; crumb.appendChild(a); });
+    crumb.appendChild(document.createTextNode('   ·   '+levelLabel()));
+
+    const rows=currentRows();
+    // columnas de candidatos: del primer row con >=2 reales (orden estable)
+    let candNames=[]; for(const r of rows){ const m=metrics(r); if(m.c.length>=2){ candNames=m.c.map(c=>c.nombre); break; } }
+
+    const cVotos = (r,i)=>{ const nm=candNames[i]; const c=(r.candidatos||[]).find(x=>x.nombre===nm); return c? (c.votos??-1) : -1; };
+    const val=(r)=>{ const m=metrics(r);
+      if(sortKey==='nombre') return String(r.nombre||r.code);
+      if(sortKey==='pct')    return r.pctActas??-1;
+      if(sortKey==='margen') return m.gap??-1;
+      if(sortKey==='lead')   return m.lead? m.lead.nombre : '';
+      if(sortKey.startsWith('votos')) return cVotos(r, +sortKey.slice(5)||0);
+      return 0; };
+    const sorted=[...rows].sort((x,y)=>{ const a=val(x),b=val(y);
+      return (typeof a==='string')? sortDir*a.localeCompare(b) : sortDir*((a??0)-(b??0)); });
+
+    const th=(k,lbl,cls)=>`<th class="${cls||''} sortable${sortKey===k?' on':''}" data-k="${k}">${lbl}${sortKey===k?(sortDir<0?' ▾':' ▴'):''}</th>`;
+    let head=`<tr>${th('nombre', levelLabel().replace(/s$/,''))}${th('pct','% actas','num')}`;
+    candNames.forEach((nm,i)=>{ head+=th('votos'+i, nm.split(' ').slice(-1)[0], 'num'); });
+    head+=`${th('margen','margen','num')}${th('lead','beneficiado')}</tr>`;
+
+    const body=sorted.map(r=>{ const m=metrics(r);
+      const cells=candNames.map(nm=>{ const c=(r.candidatos||[]).find(x=>x.nombre===nm);
+        return `<td class="num">${c&&c.votos!=null?fmt(c.votos):'—'}${c&&c.pct!=null?` <span class="pll">${c.pct.toFixed(1)}%</span>`:''}</td>`; }).join('');
+      const nm = drillable(r)
+        ? `<span class="crumb-link" data-code="${r.code}">${esc(r.nombre||r.code)}</span>`
+        : esc(r.nombre||r.code);
+      return `<tr><td>${nm} <span class="pill">${r.code}</span></td>
+        <td class="num">${r.pctActas!=null?r.pctActas.toFixed(1):'—'}</td>${cells}
+        <td class="num">${m.gap!=null?fmt(m.gap):'—'}</td>
+        <td>${m.lead?esc(m.lead.nombre.split(' ').slice(-2).join(' ')):'—'}</td></tr>`; }).join('');
+
+    host.innerHTML=`<table class="geo"><thead>${head}</thead><tbody>${body||'<tr><td>Sin datos en este nivel.</td></tr>'}</tbody></table>`;
+    host.querySelectorAll('th.sortable').forEach(h=>h.onclick=()=>{ const k=h.dataset.k;
+      if(sortKey===k) sortDir*=-1; else { sortKey=k; sortDir=(k==='nombre'||k==='lead')?1:-1; } draw(); });
+    host.querySelectorAll('span[data-code]').forEach(sp=>sp.onclick=()=>{ const r=byCode[sp.dataset.code];
+      path.push({code:r.code,nombre:r.nombre}); draw(); });
+  }
+
+  tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{ tabs.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); ambito=+b.dataset.a; path=[]; draw(); });
+  search.oninput=()=>{ query=search.value; draw(); };
+  draw();
+  return sec;
+}
+
 function rawSection(s){
   const sec=el('section');
   const d=el('details');
@@ -411,6 +501,7 @@ function rawSection(s){
       totales_nacional: s.nacional?.totales,
       candidato_0: (s.nacional?.candidatos||[])[0],
       heat_departamento_0: (Array.isArray(s.heatDepartamentos)? s.heatDepartamentos:[])[0],
+      region_0: (Array.isArray(s.regiones)? s.regiones:[])[0],
       participacion_0: (Array.isArray(s.participacion)? s.participacion:[])[0],
       errores: Object.fromEntries(Object.entries(s).filter(([,v])=>v&&v._error))
     }, null, 2))}</pre>
