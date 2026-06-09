@@ -119,7 +119,7 @@
   </header>
 
   <div class="drop" id="drop">
-    <p>Carga sola los <code>onpe_*.json</code> de la carpeta <code>snapshots/</code> (los descubre vía la API de GitHub). Solo commitea cada corte; sin manifest ni serie.</p>
+    <p>Carga sola los <code>onpe_*.json</code> listados en <code>snapshots/manifest.json</code>. Cuando agregues un corte, añade su nombre al manifest y commitea.</p>
     <div class="btns">
       <button id="copyCap">Copiar script de captura</button>
       <button class="primary" id="reload">Recargar snapshots</button>
@@ -218,6 +218,17 @@ function candColor(name, agr, idx){
   if(/juntos|sánchez|sanchez/.test(s)) return 'var(--b)';
   return idx===0? 'var(--a)':'var(--b)';
 }
+/* nombre corto y reconocible del candidato (acepta objeto {nombre,agrupacion} o string) */
+function shortName(c){
+  const nombre = typeof c==='string'? c : (c&&c.nombre)||'';
+  const agr = typeof c==='string'? '' : (c&&c.agrupacion)||'';
+  const s=(agr+' '+nombre).toLowerCase();
+  if(/fuerza popular|fujimori/.test(s)) return 'Fujimori';
+  if(/juntos|s[aá]nchez|palomino/.test(s)) return 'Sánchez';
+  const p=String(nombre||agr||'?').trim().split(/\s+/);
+  const sur=p.length>=2? p[p.length-2] : (p[0]||'?');
+  return sur.charAt(0)+sur.slice(1).toLowerCase();
+}
 
 /* ---------- estado ---------- */
 let SNAPS = [];               // snapshots normalizados, ordenados por capturedAt
@@ -246,6 +257,7 @@ function render(){
   app.innerHTML = '';
   app.appendChild(kpiSection(latest));
   app.appendChild(marginSection(latest));
+  if(SNAPS.some(s=>Array.isArray(s.regiones)&&s.regiones.length)) app.appendChild(ultimosVotosSection());
   if(SNAPS.length>=2) app.appendChild(timelineSection());
   app.appendChild(diffSection());
   if(Array.isArray(latest.regiones) && latest.regiones.length) app.appendChild(detalleGeoSection(latest));
@@ -284,11 +296,11 @@ function marginSection(s){
   const box=el('div','margin');
   box.innerHTML=`
     <div class="mrow">
-      <div class="cand"><div class="nm" style="color:${col1}">${esc(c1.nombre)}</div>
+      <div class="cand"><div class="nm" style="color:${col1}">${esc(shortName(c1))}</div>
         <div class="ag">${esc(c1.agrupacion)}</div>
         <div class="pct" style="color:${col1}">${pct(c1.pct,3)}</div>
         <div class="vt">${fmt(c1.votos)} votos</div></div>
-      <div class="cand r"><div class="nm" style="color:${col2}">${esc(c2.nombre)}</div>
+      <div class="cand r"><div class="nm" style="color:${col2}">${esc(shortName(c2))}</div>
         <div class="ag">${esc(c2.agrupacion)}</div>
         <div class="pct" style="color:${col2}">${pct(c2.pct,3)}</div>
         <div class="vt">${fmt(c2.votos)} votos</div></div>
@@ -319,7 +331,7 @@ function timelineSection(){
     <line x1="${P}" y1="${H/2}" x2="${W-P}" y2="${H/2}" stroke="var(--line)" stroke-width="1"/>
     <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>${dots}
   </svg>
-  <div class="tl-legend">línea = ventaja en votos del puntero (cero = empate). Último: ${esc(lead0.lead)} +${fmt(Math.abs(lead0.gap))}. Pico ±${fmt(maxG)}.</div>`;
+  <div class="tl-legend">línea = ventaja en votos del puntero (cero = empate). Último: ${esc(shortName(lead0.lead))} +${fmt(Math.abs(lead0.gap))}. Pico ±${fmt(maxG)}.</div>`;
   sec.appendChild(wrap);
   return sec;
 }
@@ -349,7 +361,7 @@ function renderDiff(host, A, B, sumEl){
   const ga=gapOf(A), gb=gapOf(B);
   const dGap=(ga&&gb)? gb.gap-ga.gap : null;
   if(sumEl) sumEl.innerHTML = dCont!=null
-    ? `· +${fmt(dCont)} actas nuevas${dGap!=null? ` · ventaja de ${esc(gb.lead)} ${dGap>=0?'creció':'cayó'} ${fmt(Math.abs(dGap))}`:''}`
+    ? `· +${fmt(dCont)} actas nuevas${dGap!=null? ` · ventaja de ${esc(shortName(gb.lead))} ${dGap>=0?'creció':'cayó'} ${fmt(Math.abs(dGap))}`:''}`
     : '';
   const ha={}, hb={};
   heatByDept(heatArr(A.heatDepartamentos)).forEach(h=>ha[h.code]=h);
@@ -403,7 +415,7 @@ function ambitoTable(s){
     const gap=c.length>=2? (c[0].votos??0)-(c[1].votos??0):null;
     return `<tr><td>${lbl}</td><td class="num">${t.pct!=null?t.pct.toFixed(3):'—'}</td>
       <td class="num">${fmt(t.cont)} / ${fmt(t.total)}</td>
-      <td>${c.length>=2?esc(c[0].nombre):'—'}</td><td class="num">${fmt(gap)}</td></tr>`;
+      <td>${c.length>=2?esc(shortName(c[0])):'—'}</td><td class="num">${fmt(gap)}</td></tr>`;
   }).join('');
   const tbl=el('table');
   tbl.style.marginTop='14px';
@@ -419,6 +431,14 @@ function detalleGeoSection(s){
   const childrenOf=(ambito,parent)=>regs.filter(r=>r.ambito===ambito && (r.parent||null)===(parent||null));
   let ambito=1, path=[], sortKey='votos0', sortDir=-1, query='';
 
+  // delta de votos vs el corte anterior (para el "+ votos")
+  const prev = SNAPS[SNAPS.length-2];
+  const hasPrev = !!(prev && Array.isArray(prev.regiones) && prev.regiones.length);
+  const sumVotos = r => (r.candidatos||[]).filter(c=>!c.especial).reduce((a,c)=>a+(c.votos||0),0);
+  const prevTot = {};
+  if(hasPrev) prev.regiones.forEach(r=>{ prevTot[r.code]=sumVotos(r); });
+  const deltaVotos = r => hasPrev && prevTot[r.code]!=null ? sumVotos(r)-prevTot[r.code] : null;
+
   const tabs=el('div','tabs');
   tabs.innerHTML=`<button class="on" data-a="1">Nacional</button><button data-a="2">Internacional</button>`;
   const crumb=el('div','crumb');
@@ -426,8 +446,10 @@ function detalleGeoSection(s){
   const host=el('div');
   sec.append(tabs, crumb, search, host);
 
-  const labels = a => a===1? ['Departamentos','Provincias','Distritos'] : ['Continentes','Países','Ciudades'];
-  const levelLabel=()=> labels(ambito)[path.length] || 'Regiones';
+  const plurals  = a => a===1? ['Departamentos','Provincias','Distritos'] : ['Continentes','Países','Ciudades'];
+  const singular = a => a===1? ['Departamento','Provincia','Distrito']  : ['Continente','País','Ciudad'];
+  const levelLabel=()=> plurals(ambito)[path.length] || 'Regiones';
+  const colName  =()=> singular(ambito)[path.length] || 'Región';
   const reales = r => (r.candidatos||[]).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0));
   const metrics = r => { const c=reales(r); return { c, lead:c[0], gap:(c[0]&&c[1])?((c[0].votos??0)-(c[1].votos??0)):null }; };
   const drillable = r => childrenOf(ambito, r.code).length>0;
@@ -440,7 +462,6 @@ function detalleGeoSection(s){
   }
 
   function draw(){
-    // breadcrumb
     crumb.innerHTML='';
     const root=el('span','crumb-link'); root.textContent= ambito===1?'Perú':'Exterior';
     root.onclick=()=>{ path=[]; draw(); }; crumb.appendChild(root);
@@ -449,24 +470,26 @@ function detalleGeoSection(s){
     crumb.appendChild(document.createTextNode('   ·   '+levelLabel()));
 
     const rows=currentRows();
-    // columnas de candidatos: del primer row con >=2 reales (orden estable)
     let candNames=[]; for(const r of rows){ const m=metrics(r); if(m.c.length>=2){ candNames=m.c.map(c=>c.nombre); break; } }
 
     const cVotos = (r,i)=>{ const nm=candNames[i]; const c=(r.candidatos||[]).find(x=>x.nombre===nm); return c? (c.votos??-1) : -1; };
     const val=(r)=>{ const m=metrics(r);
       if(sortKey==='nombre') return String(r.nombre||r.code);
       if(sortKey==='pct')    return r.pctActas??-1;
+      if(sortKey==='delta')  return deltaVotos(r)??-Infinity;
       if(sortKey==='margen') return m.gap??-1;
-      if(sortKey==='lead')   return m.lead? m.lead.nombre : '';
+      if(sortKey==='lead')   return m.lead? shortName(m.lead) : '';
       if(sortKey.startsWith('votos')) return cVotos(r, +sortKey.slice(5)||0);
       return 0; };
     const sorted=[...rows].sort((x,y)=>{ const a=val(x),b=val(y);
       return (typeof a==='string')? sortDir*a.localeCompare(b) : sortDir*((a??0)-(b??0)); });
 
     const th=(k,lbl,cls)=>`<th class="${cls||''} sortable${sortKey===k?' on':''}" data-k="${k}">${lbl}${sortKey===k?(sortDir<0?' ▾':' ▴'):''}</th>`;
-    let head=`<tr>${th('nombre', levelLabel().replace(/s$/,''))}${th('pct','% actas','num')}`;
-    candNames.forEach((nm,i)=>{ head+=th('votos'+i, nm.split(' ').slice(-1)[0], 'num'); });
-    head+=`${th('margen','margen','num')}${th('lead','beneficiado')}</tr>`;
+    let head=`<tr>${th('nombre', colName())}${th('pct','% actas','num')}`;
+    candNames.forEach((nm,i)=>{ head+=th('votos'+i, shortName(nm), 'num'); });
+    head+=`${th('margen','margen','num')}${th('lead','beneficiado')}`;
+    if(hasPrev) head+=th('delta','+ votos','num');
+    head+='</tr>';
 
     const body=sorted.map(r=>{ const m=metrics(r);
       const cells=candNames.map(nm=>{ const c=(r.candidatos||[]).find(x=>x.nombre===nm);
@@ -474,10 +497,12 @@ function detalleGeoSection(s){
       const nm = drillable(r)
         ? `<span class="crumb-link" data-code="${r.code}">${esc(r.nombre||r.code)}</span>`
         : esc(r.nombre||r.code);
+      const dv = deltaVotos(r);
+      const dCell = hasPrev ? `<td class="num ${dv>0?'up':(dv<0?'down':'')}">${dv==null?'—':(dv>0?'+'+fmt(dv):fmt(dv))}</td>` : '';
       return `<tr><td>${nm} <span class="pill">${r.code}</span></td>
         <td class="num">${r.pctActas!=null?r.pctActas.toFixed(1):'—'}</td>${cells}
         <td class="num">${m.gap!=null?fmt(m.gap):'—'}</td>
-        <td>${m.lead?esc(m.lead.nombre.split(' ').slice(-2).join(' ')):'—'}</td></tr>`; }).join('');
+        <td>${m.lead?esc(shortName(m.lead)):'—'}</td>${dCell}</tr>`; }).join('');
 
     host.innerHTML=`<table class="geo"><thead>${head}</thead><tbody>${body||'<tr><td>Sin datos en este nivel.</td></tr>'}</tbody></table>`;
     host.querySelectorAll('th.sortable').forEach(h=>h.onclick=()=>{ const k=h.dataset.k;
@@ -490,6 +515,38 @@ function detalleGeoSection(s){
     b.classList.add('on'); ambito=+b.dataset.a; path=[]; draw(); });
   search.oninput=()=>{ query=search.value; draw(); };
   draw();
+  return sec;
+}
+
+function ultimosVotosSection(){
+  const sec=el('section'); sec.innerHTML='<h2>Últimos votos llegaron de…</h2>';
+  const v2=SNAPS.filter(s=>Array.isArray(s.regiones)&&s.regiones.length);
+  if(v2.length<2){ const p=el('p','note'); p.textContent='Necesito ≥2 cortes con detalle por región para ver de dónde llegaron los votos.'; sec.appendChild(p); return sec; }
+  const win=v2.slice(-5), first=win[0], last=win[win.length-1];
+  // votos por departamento y candidato en cada corte
+  const depMap=s=>{ const m={}; s.regiones.filter(r=>r.level==='dep').forEach(r=>{
+      const reales=(r.candidatos||[]).filter(c=>!c.especial);
+      const o={nombre:r.nombre, ambito:r.ambito, total:0, byCand:{}};
+      reales.forEach(c=>{ const k=shortName(c); o.byCand[k]=(o.byCand[k]||0)+(c.votos||0); o.total+=(c.votos||0); });
+      m[r.code]=o; }); return m; };
+  const A=depMap(first), B=depMap(last);
+  const rows=Object.keys(B).map(code=>{
+    const dTotal=(B[code].total||0)-((A[code]&&A[code].total)||0);
+    const cands={}; Object.keys(B[code].byCand).forEach(nm=>{ cands[nm]=(B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0); });
+    return {code, nombre:B[code].nombre, ambito:B[code].ambito, dTotal, cands};
+  }).filter(r=>r.dTotal>0).sort((x,y)=>y.dTotal-x.dTotal).slice(0,10);
+  const totalNuevos=rows.reduce((a,r)=>a+r.dTotal,0);
+  const span=`${win.length} cortes · ${first.capturedAt.slice(11,16)} → ${last.capturedAt.slice(11,16)} UTC`;
+  if(!rows.length){ const p=el('p','note'); p.textContent='No entraron votos nuevos en la ventana reciente ('+span+').'; sec.appendChild(p); return sec; }
+  const box=el('div','margin');
+  box.innerHTML=`<div class="note" style="margin:0 0 10px">Ventana: ${span} · <b>+${fmt(totalNuevos)}</b> votos nuevos en total</div>
+    <table><thead><tr><th>Región</th><th class="num">+ votos</th><th class="num">→ Sánchez</th><th class="num">→ Fujimori</th></tr></thead>
+    <tbody>${rows.map(r=>{ const sg=r.cands['Sánchez'], fg=r.cands['Fujimori'];
+      const sgn=v=>v==null?'—':(v>=0?'+':'')+fmt(v);
+      return `<tr><td>${esc(r.nombre||r.code)} ${r.ambito===2?'<span class="pill">ext</span>':''}</td>
+        <td class="num up">+${fmt(r.dTotal)}</td>
+        <td class="num">${sgn(sg)}</td><td class="num">${sgn(fg)}</td></tr>`; }).join('')}</tbody></table>`;
+  sec.appendChild(box);
   return sec;
 }
 
@@ -513,40 +570,43 @@ function rawSection(s){
 function el(tag,cls){ const e=document.createElement(tag); if(cls)e.className=cls; return e; }
 
 /* ---------- carga automática desde snapshots/ ----------
-   1) En GitHub Pages: lista la carpeta vía API pública de GitHub y carga
-      todos los onpe_*.json (sin manifest ni serie: solo commitea el archivo).
-   2) Fallback: serie.json, luego manifest.json (útil en local/file://). */
+   Orden: manifest.json (repos privados) -> serie.json -> API de GitHub
+   (auto-descubrimiento, solo para repos públicos). Con manifest presente
+   no se llama a la API, así que no hay 404 espurios. */
 const SNAP_DIR='snapshots/';
 function ghContext(){
   const m=location.hostname.match(/^([^.]+)\.github\.io$/);
   if(!m) return null;
   const repo=location.pathname.split('/').filter(Boolean)[0];
-  return repo? {user:m[1], repo} : null;   // project page
+  return repo? {user:m[1], repo} : null;
 }
-function tryIndexFiles(){
-  return fetch(SNAP_DIR+'serie.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{
-    if(s){ ingest([s]); return; }
-    return fetch(SNAP_DIR+'manifest.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(m=>{
-      if(!m) return;
-      const files=Array.isArray(m)? m : (m.files||[]);
-      return Promise.all(files.map(f=>fetch(SNAP_DIR+f,{cache:'no-store'}).then(r=>r.ok?r.json():null)))
-        .then(arr=>ingest(arr.filter(Boolean)));
-    });
-  });
+function loadFromManifest(){
+  return fetch(SNAP_DIR+'manifest.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(m=>{
+    if(!m) return false;
+    const files=Array.isArray(m)? m : (m.files||[]);
+    return Promise.all(files.map(f=>fetch(SNAP_DIR+f,{cache:'no-store'}).then(r=>r.ok?r.json():null)))
+      .then(arr=>{ ingest(arr.filter(Boolean)); return true; });
+  }).catch(()=>false);
+}
+function loadFromSerie(){
+  return fetch(SNAP_DIR+'serie.json',{cache:'no-store'}).then(r=>r.ok?r.json():null)
+    .then(s=>{ if(s){ ingest([s]); return true; } return false; }).catch(()=>false);
+}
+function loadFromApi(){
+  const gh=ghContext(); if(!gh) return Promise.resolve(false);
+  return fetch(`https://api.github.com/repos/${gh.user}/${gh.repo}/contents/snapshots?ref=main`,{cache:'no-store'})
+    .then(r=>r.ok?r.json():Promise.reject()).then(list=>{
+      if(!Array.isArray(list)) return false;
+      const files=list.filter(f=>f.type==='file' && /^onpe_.*\.json$/i.test(f.name));
+      if(!files.length) return false;
+      return Promise.all(files.map(f=>fetch(f.download_url,{cache:'no-store'}).then(r=>r.ok?r.json():null)))
+        .then(arr=>{ ingest(arr.filter(Boolean)); return true; });
+    }).catch(()=>false);
 }
 function loadData(){
-  const gh=ghContext();
-  if(!gh){ tryIndexFiles().catch(()=>{}); return; }
-  fetch(`https://api.github.com/repos/${gh.user}/${gh.repo}/contents/snapshots?ref=main`,{cache:'no-store'})
-    .then(r=>r.ok?r.json():Promise.reject())
-    .then(list=>{
-      if(!Array.isArray(list)) return Promise.reject();
-      const files=list.filter(f=>f.type==='file' && /^onpe_.*\.json$/i.test(f.name));
-      if(!files.length) return tryIndexFiles();
-      return Promise.all(files.map(f=>fetch(f.download_url,{cache:'no-store'}).then(r=>r.ok?r.json():null)))
-        .then(arr=>ingest(arr.filter(Boolean)));
-    })
-    .catch(()=> tryIndexFiles().catch(()=>{}));
+  loadFromApi()
+    .then(ok=> ok ? null : loadFromManifest().then(ok2=> ok2 ? null : loadFromSerie()))
+    .catch(()=>{});
 }
 document.getElementById('reload').onclick=loadData;
 loadData();
