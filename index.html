@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conteo ONPE · Segunda Vuelta 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1b1d18; --muted:#6f7468; --line:#e4e6df; --soft:#f5f6f1;
+    --accent:#5a7a3a; --a:#cf7a2e; --b:#2f7d8c; --warn:#b04a3a;
+    --mono:'Fira Code',ui-monospace,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.45;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 80px}
+  header.top{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px;
+       border-bottom:2px solid var(--ink);padding-bottom:10px}
+  header.top h1{font-size:18px;font-weight:700;margin:0;letter-spacing:-.01em}
+  header.top .meta{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+
+  /* loader */
+  .drop{margin:18px 0;border:1.5px dashed var(--line);border-radius:10px;padding:18px;background:var(--soft);
+       display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+  .drop.drag{border-color:var(--accent);background:#eef2e6}
+  .drop p{margin:0;font-size:13px;color:var(--muted)}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  button{font-family:var(--sans);font-size:13px;font-weight:500;border:1px solid var(--line);
+       background:#fff;color:var(--ink);padding:7px 12px;border-radius:7px;cursor:pointer}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.primary:hover{filter:brightness(1.05);color:#fff}
+  input[type=file]{display:none}
+
+  .empty{padding:48px 0;text-align:center;color:var(--muted)}
+  .empty code{font-family:var(--mono);font-size:12px;background:var(--soft);padding:2px 6px;border-radius:4px}
+
+  section{margin-top:30px}
+  h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+     margin:0 0 12px;display:flex;align-items:center;gap:10px}
+  h2::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  /* KPI strip */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);
+        border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .kpi{background:#fff;padding:14px 16px}
+  .kpi .v{font-family:var(--mono);font-size:24px;font-weight:600;letter-spacing:-.02em}
+  .kpi .v small{font-size:13px;color:var(--muted);font-weight:400}
+  .kpi .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+  .kpi.hot .v{color:var(--warn)}
+
+  /* margin tug of war (signature) */
+  .margin{border:1px solid var(--line);border-radius:12px;padding:22px 22px 18px}
+  .mrow{display:flex;justify-content:space-between;align-items:flex-end;font-family:var(--mono);margin-bottom:10px}
+  .cand{max-width:46%}
+  .cand .nm{font-family:var(--sans);font-weight:600;font-size:14px;line-height:1.2}
+  .cand .ag{font-size:11px;color:var(--muted)}
+  .cand .pct{font-size:30px;font-weight:600;letter-spacing:-.02em;margin-top:4px}
+  .cand .vt{font-size:12px;color:var(--muted)}
+  .cand.r{text-align:right}
+  .bar{position:relative;height:14px;border-radius:7px;overflow:hidden;background:var(--soft);display:flex}
+  .bar i{display:block;height:100%}
+  .bar .mid{position:absolute;top:-4px;bottom:-4px;left:50%;width:2px;background:var(--ink);transform:translateX(-50%)}
+  .gap{text-align:center;font-family:var(--mono);font-size:13px;margin-top:12px;color:var(--ink)}
+  .gap b{color:var(--warn)}
+  .extra{text-align:center;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px}
+
+  /* timeline */
+  .tl-wrap{border:1px solid var(--line);border-radius:12px;padding:16px}
+  svg.spark{width:100%;height:160px;display:block}
+  .tl-legend{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:6px;text-align:center}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+  td.num,th.num{font-family:var(--mono)}
+  td.up{color:var(--accent)} td.down{color:var(--warn)}
+  .lead-a{color:var(--a);font-weight:600} .lead-b{color:var(--b);font-weight:600}
+  .pill{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:10px;background:var(--soft)}
+
+  .tabs{display:flex;gap:6px;margin-bottom:10px}
+  .tabs button{font-size:12px;padding:5px 11px}
+  .tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  .pick{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:12px;margin-bottom:12px;color:var(--muted)}
+  select{font-family:var(--mono);font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:#fff}
+
+  details{margin-top:14px;font-size:12px;color:var(--muted)}
+  details pre{font-family:var(--mono);font-size:11px;background:var(--soft);padding:12px;border-radius:8px;
+       overflow:auto;max-height:300px;color:var(--ink)}
+  .note{font-size:12px;color:var(--muted);margin-top:8px}
+  .err{color:var(--warn)}
+  footer{margin-top:50px;font-family:var(--mono);font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}
+  @media(prefers-reduced-motion:no-preference){.bar i{transition:width .5s ease}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Conteo oficial ONPE</div>
+      <h1>Segunda Vuelta Presidencial · 2026</h1>
+    </div>
+    <div class="meta" id="meta">sin datos cargados</div>
+  </header>
+
+  <div class="drop" id="drop">
+    <p>Los cortes se cargan solos desde la carpeta <code>snapshots/</code>. Captura nuevos con el script de consola.</p>
+    <div class="btns">
+      <button id="copyCap">Copiar script de captura</button>
+      <button class="primary" id="reload">Recargar snapshots</button>
+    </div>
+  </div>
+
+  <div id="app">
+    <div class="empty">
+      <p>Carga al menos un snapshot para empezar.</p>
+      <p>Captura: abre <code>resultadosegundavuelta.onpe.gob.pe/main/resumen</code>, F12 → consola,
+         pega el script de captura. Descargará un <code>.json</code> por corte; ponlos en <code>snapshots/</code>.</p>
+    </div>
+  </div>
+
+  <footer>
+    Instrumento de monitoreo · datos: API ONPE (presentacion-backend). Las marcas de tiempo son de captura, no de ONPE.
+  </footer>
+</div>
+
+<script>
+/* ---------- mapa de ubigeos nivel-01 (depto) + exterior ---------- */
+const DEPT = {
+  '01':'Amazonas','02':'Áncash','03':'Apurímac','04':'Arequipa','05':'Ayacucho','06':'Cajamarca',
+  '07':'Callao','08':'Cusco','09':'Huancavelica','10':'Huánuco','11':'Ica','12':'Junín','13':'La Libertad',
+  '14':'Lambayeque','15':'Lima','16':'Loreto','17':'Madre de Dios','18':'Moquegua','19':'Pasco','20':'Piura',
+  '21':'Puno','22':'San Martín','23':'Tacna','24':'Tumbes','25':'Ucayali',
+  '91':'Exterior · África','92':'Exterior · América','93':'Exterior · Asia','94':'Exterior · Europa','95':'Exterior · Oceanía'
+};
+const regionName = (code) => DEPT[String(code).slice(0,2)] || ('ubigeo '+code);
+
+/* ---------- helpers ---------- */
+const num = (...vals) => {
+  for (const v of vals){ if(v===undefined||v===null) continue;
+    const n = typeof v==='string'? parseFloat(v.replace(/,/g,'')) : v;
+    if (typeof n==='number' && !Number.isNaN(n)) return n; }
+  return null;
+};
+const fmt = (n) => n==null? '—' : n.toLocaleString('es-PE');
+const pct = (n,d=3) => n==null? '—' : n.toFixed(d)+'%';
+const esc = (s) => String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function normCand(c){
+  const nombre = c.nombreCandidato ?? c.nombre ?? c.candidato ?? c.nombreAgrupacionPolitica ?? '?';
+  return {
+    nombre,
+    agrupacion: c.nombreAgrupacionPolitica ?? c.agrupacion ?? '',
+    votos: num(c.votos,c.votosObtenidos,c.totalVotos,c.cantidadVotos,c.numeroVotos),
+    pct: num(c.porcentajeVotosValidos,c.porcentaje,c.porcentajeValidos),
+    especial: /blanco|nulo|viciad/i.test(String(nombre)),
+  };
+}
+const candList = (arr) => (Array.isArray(arr)? arr : []).map(normCand);
+const reales = (arr) => candList(arr).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0));
+
+function totView(t){
+  if(!t || t._error) return {error:t&&t._error};
+  return {
+    pct: num(t.actasContabilizadas), cont: num(t.contabilizadas), total: num(t.totalActas),
+    jee: num(t.actasEnviadasJee), particip: num(t.participacionCiudadana), raw:t
+  };
+}
+function normHeat(e){
+  const code = e.ubigeo ?? e.idUbigeo ?? e.codigoUbigeo ?? e.codigo ?? e.id ?? e.ubigeoNivel01;
+  const cands = candList(e.candidatos || e.participantes);
+  return {
+    code: code!=null? String(code): null,
+    cont: num(e.contabilizadas, e.actasContabilizadas_n, e.numActas),
+    pct: num(e.actasContabilizadas, e.porcentajeActas),
+    total: num(e.totalActas),
+    cands: cands.filter(c=>!c.especial),
+    raw:e
+  };
+}
+const heatArr = (h) => (Array.isArray(h)? h : []).map(normHeat).filter(x=>x.code);
+
+/* candidato -> color, estable por agrupacion conocida o por orden */
+function candColor(name, agr, idx){
+  const s=(agr+' '+name).toLowerCase();
+  if(/fuerza popular|fujimori/.test(s)) return 'var(--a)';
+  if(/juntos|sánchez|sanchez/.test(s)) return 'var(--b)';
+  return idx===0? 'var(--a)':'var(--b)';
+}
+
+/* ---------- estado ---------- */
+let SNAPS = [];               // snapshots normalizados, ordenados por capturedAt
+function ingest(objs){
+  const flat=[];
+  for(const o of objs){
+    if(!o) continue;
+    if(o.type==='serie' && Array.isArray(o.serie)) flat.push(...o.serie);
+    else if(Array.isArray(o)) flat.push(...o);
+    else flat.push(o);
+  }
+  const byKey={};
+  [...SNAPS, ...flat].forEach(s=>{ if(s&&s.capturedAt) byKey[s.capturedAt.slice(0,16)]=s; });
+  SNAPS = Object.values(byKey).sort((a,b)=>a.capturedAt.localeCompare(b.capturedAt));
+  render();
+}
+
+/* ---------- render ---------- */
+function render(){
+  const app=document.getElementById('app');
+  if(!SNAPS.length){ return; }
+  const latest = SNAPS[SNAPS.length-1];
+  document.getElementById('meta').textContent =
+    `${SNAPS.length} corte(s) · último ${latest.capturedAt.replace('T',' ').slice(0,19)}Z · idEleccion ${latest.idEleccion??'?'}`;
+
+  app.innerHTML = '';
+  app.appendChild(kpiSection(latest));
+  app.appendChild(marginSection(latest));
+  if(SNAPS.length>=2) app.appendChild(timelineSection());
+  app.appendChild(diffSection());
+  app.appendChild(regionSection(latest));
+  app.appendChild(rawSection(latest));
+}
+
+function kpiSection(s){
+  const t=totView(s.nacional?.totales);
+  const sec=el('section'); sec.innerHTML='<h2>Avance del conteo</h2>';
+  const g=el('div','kpis');
+  const falta = (t.cont!=null&&t.total!=null)? t.total-t.cont : null;
+  g.innerHTML = `
+    ${kpi(t.pct!=null? t.pct.toFixed(3):'—', '%', 'Actas contabilizadas')}
+    ${kpi(fmt(t.cont), ' / '+fmt(t.total), 'Actas (conteo / total)')}
+    ${kpi(fmt(falta), ' actas', 'Faltan por contabilizar', true)}
+    ${kpi(t.particip!=null? t.particip.toFixed(2):'—', '%', 'Participación')}
+    ${kpi(t.jee!=null? t.jee.toFixed(3):'—', '%', 'Actas enviadas al JEE')}`;
+  sec.appendChild(g);
+  if(t.error){ const n=el('p','note err'); n.textContent='totales nacionales: '+t.error; sec.appendChild(n); }
+  return sec;
+}
+const kpi=(v,u,l,hot)=>`<div class="kpi${hot?' hot':''}"><div class="v">${v}<small>${u}</small></div><div class="l">${l}</div></div>`;
+
+function marginSection(s){
+  const sec=el('section'); sec.innerHTML='<h2>Cómo va · margen</h2>';
+  const c=reales(s.nacional?.candidatos);
+  if(c.length<2){ const p=el('p','note'); p.textContent='No se pudieron leer los candidatos en este corte.'; sec.appendChild(p); return sec; }
+  const [c1,c2]=c;
+  const col1=candColor(c1.nombre,c1.agrupacion,0), col2=candColor(c2.nombre,c2.agrupacion,1);
+  const v1=c1.votos??0, v2=c2.votos??0, tot=v1+v2||1;
+  const w1=(v1/tot*100), w2=(v2/tot*100);
+  const gap=Math.abs(v1-v2);
+  const especiales=candList(s.nacional?.candidatos).filter(x=>x.especial);
+  const box=el('div','margin');
+  box.innerHTML=`
+    <div class="mrow">
+      <div class="cand"><div class="nm" style="color:${col1}">${esc(c1.nombre)}</div>
+        <div class="ag">${esc(c1.agrupacion)}</div>
+        <div class="pct" style="color:${col1}">${pct(c1.pct,3)}</div>
+        <div class="vt">${fmt(c1.votos)} votos</div></div>
+      <div class="cand r"><div class="nm" style="color:${col2}">${esc(c2.nombre)}</div>
+        <div class="ag">${esc(c2.agrupacion)}</div>
+        <div class="pct" style="color:${col2}">${pct(c2.pct,3)}</div>
+        <div class="vt">${fmt(c2.votos)} votos</div></div>
+    </div>
+    <div class="bar"><i style="width:${w1}%;background:${col1}"></i><i style="width:${w2}%;background:${col2}"></i><span class="mid"></span></div>
+    <div class="gap">diferencia <b>${fmt(gap)}</b> votos · ${(Math.abs(w1-w2)).toFixed(2)} pts</div>
+    ${especiales.length? `<div class="extra">${especiales.map(e=>esc(e.nombre)+': '+pct(e.pct,2)).join('  ·  ')}</div>`:''}`;
+  sec.appendChild(box);
+  return sec;
+}
+
+function gapOf(s){ const c=reales(s.nacional?.candidatos); if(c.length<2) return null;
+  return { t:s.capturedAt, lead:c[0].nombre, gap:(c[0].votos??0)-(c[1].votos??0),
+           cont:num(s.nacional?.totales?.contabilizadas) }; }
+
+function timelineSection(){
+  const sec=el('section'); sec.innerHTML='<h2>Evolución del margen</h2>';
+  const pts=SNAPS.map(gapOf).filter(Boolean);
+  if(pts.length<2){ const p=el('p','note'); p.textContent='Se necesitan ≥2 cortes con candidatos legibles.'; sec.appendChild(p); return sec; }
+  const wrap=el('div','tl-wrap');
+  const W=1000,H=160,P=24, maxG=Math.max(...pts.map(p=>Math.abs(p.gap)),1);
+  const x=i=>P+(W-2*P)*i/(pts.length-1);
+  const y=g=>H/2 - (g/maxG)*(H/2-P);
+  const line=pts.map((p,i)=>`${x(i).toFixed(1)},${y(p.gap).toFixed(1)}`).join(' ');
+  const dots=pts.map((p,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(p.gap).toFixed(1)}" r="3" fill="${p.gap>=0?'var(--a)':'var(--b)'}"/>`).join('');
+  const lead0=pts[pts.length-1];
+  wrap.innerHTML=`<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <line x1="${P}" y1="${H/2}" x2="${W-P}" y2="${H/2}" stroke="var(--line)" stroke-width="1"/>
+    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>${dots}
+  </svg>
+  <div class="tl-legend">línea = ventaja en votos del puntero (cero = empate). Último: ${esc(lead0.lead)} +${fmt(Math.abs(lead0.gap))}. Pico ±${fmt(maxG)}.</div>`;
+  sec.appendChild(wrap);
+  return sec;
+}
+
+function diffSection(){
+  const sec=el('section'); sec.innerHTML='<h2>De dónde vienen las actas</h2>';
+  if(SNAPS.length<2){ const p=el('p','note'); p.textContent='Carga al menos 2 cortes para ver el delta entre ellos.'; sec.appendChild(p); return sec; }
+  const opts=SNAPS.map((s,i)=>`<option value="${i}">${s.capturedAt.replace('T',' ').slice(5,19)}</option>`).join('');
+  const pick=el('div','pick');
+  pick.innerHTML=`comparar <select id="da">${opts}</select> → <select id="db">${opts}</select> <span id="dsum"></span>`;
+  sec.appendChild(pick);
+  const host=el('div'); sec.appendChild(host);
+  const draw=()=>{
+    const ai=+pick.querySelector('#da').value, bi=+pick.querySelector('#db').value;
+    host.innerHTML=''; renderDiff(host, SNAPS[ai], SNAPS[bi], pick.querySelector('#dsum'));
+  };
+  pick.querySelector('#da').value=SNAPS.length-2;
+  pick.querySelector('#db').value=SNAPS.length-1;
+  pick.querySelector('#da').onchange=draw; pick.querySelector('#db').onchange=draw;
+  draw();
+  return sec;
+}
+
+function renderDiff(host, A, B, sumEl){
+  const ca=totView(A.nacional?.totales), cb=totView(B.nacional?.totales);
+  const dCont=(cb.cont!=null&&ca.cont!=null)? cb.cont-ca.cont : null;
+  const ga=gapOf(A), gb=gapOf(B);
+  const dGap=(ga&&gb)? gb.gap-ga.gap : null;
+  if(sumEl) sumEl.innerHTML = dCont!=null
+    ? `· +${fmt(dCont)} actas nuevas${dGap!=null? ` · margen movió ${dGap>=0?'+':''}${fmt(dGap)} para ${esc((dGap>=0?gb:gb).lead)}`:''}`
+    : '';
+  // por departamento
+  const ha={}, hb={};
+  heatArr(A.heatDepartamentos).forEach(h=>ha[h.code]=h);
+  heatArr(B.heatDepartamentos).forEach(h=>hb[h.code]=h);
+  const codes=[...new Set([...Object.keys(ha),...Object.keys(hb)])];
+  const hasVotes = codes.some(c=> (hb[c]?.cands||[]).length>=2);
+  const rows=codes.map(code=>{
+    const a=ha[code], b=hb[code];
+    const dc=(b?.cont!=null&&a?.cont!=null)? b.cont-a.cont : (b?.cont??null);
+    let dv1=null,dv2=null,leadNm='';
+    if(hasVotes && b?.cands?.length>=2){
+      const bs=[...b.cands].sort((x,y)=>(y.votos??0)-(x.votos??0));
+      const as=a?.cands? Object.fromEntries(a.cands.map(c=>[c.nombre,c.votos??0])):{};
+      dv1=(bs[0].votos??0)-(as[bs[0].nombre]??0);
+      dv2=(bs[1].votos??0)-(as[bs[1].nombre]??0);
+      leadNm=bs[0].nombre;
+    }
+    return {code,dc,dv1,dv2,leadNm};
+  }).filter(r=>r.dc!=null && r.dc!==0).sort((a,b)=>(b.dc||0)-(a.dc||0));
+
+  if(!codes.length){ const p=el('p','note err'); p.textContent='Sin datos de mapa-calor por departamento en estos cortes (revisa el panel de inspección para ver el esquema real).'; host.appendChild(p); return; }
+  if(!rows.length){ const p=el('p','note'); p.textContent='No hubo nuevas actas por departamento entre estos dos cortes.'; host.appendChild(p); return; }
+
+  const tbl=el('table');
+  tbl.innerHTML=`<thead><tr><th>Departamento</th><th class="num">+ actas</th>${hasVotes?`<th class="num">Δ puntero</th><th class="num">Δ segundo</th><th>Empujó a</th>`:''}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>
+      <td>${esc(regionName(r.code))} <span class="pill">${r.code}</span></td>
+      <td class="num up">+${fmt(r.dc)}</td>
+      ${hasVotes?`<td class="num">${r.dv1>=0?'+':''}${fmt(r.dv1)}</td>
+        <td class="num">${r.dv2>=0?'+':''}${fmt(r.dv2)}</td>
+        <td>${esc(r.leadNm)}</td>`:''}
+    </tr>`).join('')}</tbody>`;
+  host.appendChild(tbl);
+  if(!hasVotes){ const p=el('p','note'); p.textContent='El mapa-calor de estos cortes no trajo votos por candidato; se muestra solo el avance de actas. Si me pasas el esquema real, agrego la atribución de votos por región.'; host.appendChild(p); }
+}
+
+function regionSection(s){
+  const sec=el('section'); sec.innerHTML='<h2>Por región · último corte</h2>';
+  const heat=heatArr(s.heatDepartamentos);
+  if(!heat.length){
+    // fallback: Perú vs Exterior desde los bloques de ámbito
+    const t=el('div'); t.appendChild(ambitoTable(s)); sec.appendChild(t); return sec;
+  }
+  const tabs=el('div','tabs');
+  tabs.innerHTML=`<button class="on" data-f="all">Todo</button><button data-f="peru">Perú</button><button data-f="ext">Exterior</button>`;
+  const host=el('div'); sec.appendChild(tabs); sec.appendChild(host);
+  sec.appendChild(ambitoTable(s));
+  const draw=(f)=>{
+    host.innerHTML='';
+    const rows=heat.filter(h=> f==='all'? true : f==='ext'? /^9/.test(h.code) : !/^9/.test(h.code))
+      .sort((a,b)=>(b.cont??0)-(a.cont??0));
+    const hasVotes=rows.some(r=>r.cands.length>=2);
+    const tbl=el('table');
+    tbl.innerHTML=`<thead><tr><th>Región</th><th class="num">% actas</th><th class="num">contab.</th>${hasVotes?'<th>Puntero</th><th class="num">margen</th>':''}</tr></thead>
+      <tbody>${rows.map(r=>{
+        let lead='',mg='';
+        if(r.cands.length>=2){const c=[...r.cands].sort((x,y)=>(y.votos??0)-(x.votos??0));
+          lead=`<span class="${candColor(c[0].nombre,c[0].agrupacion,0)==='var(--a)'?'lead-a':'lead-b'}">${esc(c[0].nombre)}</span>`;
+          mg=fmt((c[0].votos??0)-(c[1].votos??0));}
+        return `<tr><td>${esc(regionName(r.code))} <span class="pill">${r.code}</span></td>
+          <td class="num">${r.pct!=null?r.pct.toFixed(2):'—'}</td><td class="num">${fmt(r.cont)}</td>
+          ${hasVotes?`<td>${lead}</td><td class="num">${mg}</td>`:''}</tr>`;}).join('')}</tbody>`;
+    host.appendChild(tbl);
+  };
+  tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    tabs.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); draw(b.dataset.f);});
+  draw('all');
+  return sec;
+}
+
+function ambitoTable(s){
+  const box=el('div'); const rows=[['Nacional',s.nacional],['Perú',s.peru],['Exterior',s.exterior]];
+  const trs=rows.map(([lbl,blk])=>{
+    if(!blk) return '';
+    const t=totView(blk.totales), c=reales(blk.candidatos);
+    const gap=c.length>=2? (c[0].votos??0)-(c[1].votos??0):null;
+    return `<tr><td>${lbl}</td><td class="num">${t.pct!=null?t.pct.toFixed(3):'—'}</td>
+      <td class="num">${fmt(t.cont)} / ${fmt(t.total)}</td>
+      <td>${c.length>=2?esc(c[0].nombre):'—'}</td><td class="num">${fmt(gap)}</td></tr>`;
+  }).join('');
+  const tbl=el('table');
+  tbl.style.marginTop='14px';
+  tbl.innerHTML=`<thead><tr><th>Ámbito</th><th class="num">% actas</th><th class="num">contab./total</th><th>Puntero</th><th class="num">margen</th></tr></thead><tbody>${trs}</tbody>`;
+  box.appendChild(tbl);
+  return box;
+}
+
+function rawSection(s){
+  const sec=el('section');
+  const d=el('details');
+  d.innerHTML=`<summary>Inspección · esquema real del último corte</summary>
+    <pre>${esc(JSON.stringify({
+      totales_nacional: s.nacional?.totales,
+      candidato_0: (s.nacional?.candidatos||[])[0],
+      heat_departamento_0: (Array.isArray(s.heatDepartamentos)? s.heatDepartamentos:[])[0],
+      participacion_0: (Array.isArray(s.participacion)? s.participacion:[])[0],
+      errores: Object.fromEntries(Object.entries(s).filter(([,v])=>v&&v._error))
+    }, null, 2))}</pre>
+    <p class="note">Si ves campos que el tablero no está usando bien (sobre todo en candidatos o mapa-calor), cópiame este bloque y afino los normalizadores.</p>`;
+  sec.appendChild(d);
+  return sec;
+}
+
+function el(tag,cls){ const e=document.createElement(tag); if(cls)e.className=cls; return e; }
+
+/* ---------- GitHub Pages: carga automática desde snapshots/ ---------- */
+const SNAP_DIR='snapshots/';
+function loadData(){
+  fetch(SNAP_DIR+'manifest.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(m=>{
+    if(m){
+      const files=Array.isArray(m)? m : (m.files||[]);
+      return Promise.all(files.map(f=>fetch(SNAP_DIR+f,{cache:'no-store'}).then(r=>r.ok?r.json():null)))
+        .then(arr=>ingest(arr.filter(Boolean)));
+    }
+    // sin manifest: intenta una serie única en snapshots/serie.json
+    return fetch(SNAP_DIR+'serie.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(s=>{ if(s) ingest([s]); });
+  }).catch(()=>{});
+}
+document.getElementById('reload').onclick=loadData;
+loadData();
+
+/* ---------- copiar script de captura ---------- */
+const CAPTURE_SRC = `Pega capture.js (incluido junto a este archivo) en la consola de resultadosegundavuelta.onpe.gob.pe`;
+document.getElementById('copyCap').onclick=async()=>{
+  try{ await navigator.clipboard.writeText(CAPTURE_SRC); document.getElementById('copyCap').textContent='Ver capture.js ↗'; }
+  catch{ alert(CAPTURE_SRC); }
+};
+</script>
+</body>
+</html>
