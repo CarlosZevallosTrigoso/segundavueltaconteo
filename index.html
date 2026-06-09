@@ -106,6 +106,7 @@
   table.geo th.sortable:hover{color:var(--ink)}
   table.geo th.on{color:var(--ink)}
   .pll{font-size:10px;color:var(--muted)}
+  table.geo tr.totalrow td{font-weight:600;background:var(--soft);border-bottom:2px solid var(--line)}
 </style>
 </head>
 <body>
@@ -119,10 +120,9 @@
   </header>
 
   <div class="drop" id="drop">
-    <p>Carga sola los <code>onpe_*.json</code> listados en <code>snapshots/manifest.json</code>. Cuando agregues un corte, añade su nombre al manifest y commitea.</p>
+    <p>Los cortes de <code>snapshots/</code> se cargan solos (auto-detección por GitHub). Captura uno nuevo con el script de consola y sube el <code>.json</code> al repo.</p>
     <div class="btns">
-      <button id="copyCap">Copiar script de captura</button>
-      <button class="primary" id="reload">Recargar snapshots</button>
+      <button class="primary" id="reload">Recargar</button>
     </div>
   </div>
 
@@ -339,7 +339,8 @@ function timelineSection(){
 function diffSection(){
   const sec=el('section'); sec.innerHTML='<h2>De dónde vienen las actas</h2>';
   if(SNAPS.length<2){ const p=el('p','note'); p.textContent='Carga al menos 2 cortes para ver el delta entre ellos.'; sec.appendChild(p); return sec; }
-  const opts=SNAPS.map((s,i)=>`<option value="${i}">${s.capturedAt.replace('T',' ').slice(5,19)}</option>`).join('');
+  const opts=SNAPS.map((s,i)=>{ const p=totView(s.nacional?.totales).pct;
+    return `<option value="${i}">${s.capturedAt.replace('T',' ').slice(5,19)} · ${p!=null?p.toFixed(2)+'%':'?'}</option>`; }).join('');
   const pick=el('div','pick');
   pick.innerHTML=`comparar <select id="da">${opts}</select> → <select id="db">${opts}</select> <span id="dsum"></span>`;
   sec.appendChild(pick);
@@ -360,9 +361,10 @@ function renderDiff(host, A, B, sumEl){
   const dCont=(cb.cont!=null&&ca.cont!=null)? cb.cont-ca.cont : null;
   const ga=gapOf(A), gb=gapOf(B);
   const dGap=(ga&&gb)? gb.gap-ga.gap : null;
-  if(sumEl) sumEl.innerHTML = dCont!=null
-    ? `· +${fmt(dCont)} actas nuevas${dGap!=null? ` · ventaja de ${esc(shortName(gb.lead))} ${dGap>=0?'creció':'cayó'} ${fmt(Math.abs(dGap))}`:''}`
-    : '';
+  if(sumEl){ const cov=(ca.pct!=null&&cb.pct!=null)? `${ca.pct.toFixed(2)}% → ${cb.pct.toFixed(2)}% del conteo · ` : '';
+    sumEl.innerHTML = (dCont!=null || cov)
+      ? `· ${cov}${dCont!=null?`+${fmt(dCont)} actas nuevas`:''}${dGap!=null? ` · ventaja de ${esc(shortName(gb.lead))} ${dGap>=0?'creció':'cayó'} ${fmt(Math.abs(dGap))}`:''}`
+      : ''; }
   const ha={}, hb={};
   heatByDept(heatArr(A.heatDepartamentos)).forEach(h=>ha[h.code]=h);
   heatByDept(heatArr(B.heatDepartamentos)).forEach(h=>hb[h.code]=h);
@@ -504,7 +506,24 @@ function detalleGeoSection(s){
         <td class="num">${m.gap!=null?fmt(m.gap):'—'}</td>
         <td>${m.lead?esc(shortName(m.lead)):'—'}</td>${dCell}</tr>`; }).join('');
 
-    host.innerHTML=`<table class="geo"><thead>${head}</thead><tbody>${body||'<tr><td>Sin datos en este nivel.</td></tr>'}</tbody></table>`;
+    // fila de totales del ámbito/región actual
+    let scopeName, scopeCands, scopePct, scopeDelta=null;
+    if(path.length){ const node=byCode[path[path.length-1].code];
+      scopeName='TOTAL '+(node?.nombre||node?.code||''); scopeCands=node?metrics(node).c:[]; scopePct=node?node.pctActas:null; scopeDelta=node?deltaVotos(node):null; }
+    else { const blk = ambito===1? s.peru : s.exterior;
+      scopeName = ambito===1? 'TOTAL Perú' : 'TOTAL Exterior';
+      scopeCands = blk? reales(blk.candidatos) : []; scopePct = blk? totView(blk.totales).pct : null;
+      if(hasPrev){ scopeDelta=0; regs.filter(r=>r.ambito===ambito&&r.level==='dep').forEach(r=>{ const dd=deltaVotos(r); if(dd!=null) scopeDelta+=dd; }); } }
+    const tFind = nm => scopeCands.find(c=>c.nombre===nm);
+    const tCells = candNames.map(nm=>{ const c=tFind(nm); return `<td class="num">${c&&c.votos!=null?fmt(c.votos):'—'}</td>`; }).join('');
+    const tGap = (scopeCands[0]&&scopeCands[1])? (scopeCands[0].votos??0)-(scopeCands[1].votos??0) : null;
+    const tDeltaCell = hasPrev ? `<td class="num ${scopeDelta>0?'up':''}">${scopeDelta==null?'—':(scopeDelta>0?'+'+fmt(scopeDelta):fmt(scopeDelta))}</td>` : '';
+    const totalRow = `<tr class="totalrow"><td>${esc(scopeName)}</td>
+      <td class="num">${scopePct!=null?scopePct.toFixed(1):'—'}</td>${tCells}
+      <td class="num">${tGap!=null?fmt(tGap):'—'}</td>
+      <td>${scopeCands[0]?esc(shortName(scopeCands[0])):'—'}</td>${tDeltaCell}</tr>`;
+
+    host.innerHTML=`<table class="geo"><thead>${head}</thead><tbody>${totalRow}${body||'<tr><td>Sin datos en este nivel.</td></tr>'}</tbody></table>`;
     host.querySelectorAll('th.sortable').forEach(h=>h.onclick=()=>{ const k=h.dataset.k;
       if(sortKey===k) sortDir*=-1; else { sortKey=k; sortDir=(k==='nombre'||k==='lead')?1:-1; } draw(); });
     host.querySelectorAll('span[data-code]').forEach(sp=>sp.onclick=()=>{ const r=byCode[sp.dataset.code];
@@ -610,13 +629,6 @@ function loadData(){
 }
 document.getElementById('reload').onclick=loadData;
 loadData();
-
-/* ---------- copiar script de captura ---------- */
-const CAPTURE_SRC = `Pega capture.js (incluido junto a este archivo) en la consola de resultadosegundavuelta.onpe.gob.pe`;
-document.getElementById('copyCap').onclick=async()=>{
-  try{ await navigator.clipboard.writeText(CAPTURE_SRC); document.getElementById('copyCap').textContent='Ver capture.js ↗'; }
-  catch{ alert(CAPTURE_SRC); }
-};
 </script>
 </body>
 </html>
