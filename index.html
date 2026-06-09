@@ -166,6 +166,10 @@ const num = (...vals) => {
 const fmt = (n) => n==null? '—' : n.toLocaleString('es-PE');
 const pct = (n,d=3) => n==null? '—' : n.toFixed(d)+'%';
 const esc = (s) => String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// hora de Lima (UTC-5). capturedAt viene en ISO UTC (...Z); se convierte con zona horaria real.
+const limaFmt = (iso, opts) => { try{ const d=new Date(iso); if(isNaN(d)) return String(iso); return d.toLocaleString('es-PE',{timeZone:'America/Lima',hour12:false,...opts}); }catch(e){ return String(iso); } };
+const limaHM   = iso => limaFmt(iso,{hour:'2-digit',minute:'2-digit'});
+const limaFull = iso => limaFmt(iso,{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'});
 
 function normCand(c){
   const agrupacion = c.nombreAgrupacionPolitica ?? c.agrupacion ?? '';
@@ -256,7 +260,7 @@ function render(){
   if(!SNAPS.length){ return; }
   const latest = SNAPS[SNAPS.length-1];
   document.getElementById('meta').textContent =
-    `${SNAPS.length} corte(s) · último ${latest.capturedAt.replace('T',' ').slice(0,19)}Z · idEleccion ${latest.idEleccion??'?'}`;
+    `${SNAPS.length} corte(s) · último ${limaFull(latest.capturedAt)} (hora de Lima) · idEleccion ${latest.idEleccion??'?'}`;
 
   app.innerHTML = '';
   app.appendChild(kpiSection(latest));
@@ -344,7 +348,7 @@ function diffSection(){
   const sec=el('section'); sec.innerHTML='<h2>De dónde vienen las actas</h2>';
   if(SNAPS.length<2){ const p=el('p','note'); p.textContent='Carga al menos 2 cortes para ver el delta entre ellos.'; sec.appendChild(p); return sec; }
   const opts=SNAPS.map((s,i)=>{ const p=totView(s.nacional?.totales).pct;
-    return `<option value="${i}">${s.capturedAt.replace('T',' ').slice(5,19)} · ${p!=null?p.toFixed(2)+'%':'?'}</option>`; }).join('');
+    return `<option value="${i}">${limaFmt(s.capturedAt,{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})} · ${p!=null?p.toFixed(2)+'%':'?'}</option>`; }).join('');
   const pick=el('div','pick');
   pick.innerHTML=`comparar <select id="da">${opts}</select> → <select id="db">${opts}</select> <span id="dsum"></span>`;
   sec.appendChild(pick);
@@ -436,6 +440,16 @@ function detalleGeoSection(s){
   const byCode={}; regs.forEach(r=>byCode[r.code]=r);
   const childrenOf=(ambito,parent)=>regs.filter(r=>r.ambito===ambito && (r.parent||null)===(parent||null));
 
+  // cobertura de actas a nivel departamento/continente: el snapshot no la trae a ese nivel,
+  // pero se deriva sumando la de las provincias/países del mapa-calor (heatProvincias).
+  const depCov={};
+  (s.heatProvincias||[]).forEach(h=>{ const k=String(h.ubigeoNivel01).padStart(6,'0');
+    const cont=num(h.actasContabilizadas), p=num(h.porcentajeActasContabilizadas);
+    if(cont==null) return;
+    if(!depCov[k]) depCov[k]={cont:0,total:0};
+    depCov[k].cont+=cont; depCov[k].total+= (p&&p>0)? cont/(p/100) : cont; });
+  const covPct = r => r && (r.pctActas!=null ? r.pctActas : (r.level==='dep' && depCov[r.code] && depCov[r.code].total>0 ? depCov[r.code].cont/depCov[r.code].total*100 : null));
+
   // candidatos canónicos (orden estable) + especiales, desde el bloque nacional
   const mainCands = candList(s.nacional?.candidatos).filter(c=>!c.especial).sort((a,b)=>(b.votos??0)-(a.votos??0));
   const candNames = mainCands.map(c=>c.nombre);
@@ -494,7 +508,7 @@ function detalleGeoSection(s){
     const rows=currentRows();
     const val=(r)=>{
       if(sortKey==='nombre') return String(r.nombre||r.code);
-      if(sortKey==='pct')    return r.pctActas??-1;
+      if(sortKey==='pct')    return covPct(r)??-1;
       if(sortKey==='delta')  return deltaVotos(r)??-Infinity;
       if(sortKey==='margen') return signedMargin(r)??-Infinity;
       if(sortKey==='lead'){ const c=realesArr(r)[0]; return c?shortName(c):''; }
@@ -527,11 +541,11 @@ function detalleGeoSection(s){
 
     const body=sorted.map(r=>{
       const nm = drillable(r)? `<span class="crumb-link" data-code="${r.code}">${esc(r.nombre||r.code)}</span>` : esc(r.nombre||r.code);
-      return `<tr><td>${nm} <span class="pill">${r.code}</span></td><td class="num">${r.pctActas!=null?r.pctActas.toFixed(1):'—'}</td>${dataCells(r)}</tr>`; }).join('');
+      return `<tr><td>${nm} <span class="pill">${r.code}</span></td><td class="num">${covPct(r)!=null?covPct(r).toFixed(1):'—'}</td>${dataCells(r)}</tr>`; }).join('');
 
     // fila TOTAL del ámbito/región actual
     let scopeNode, scopeName, scopePct, scopeDelta;
-    if(path.length){ scopeNode=byCode[path[path.length-1].code]; scopeName='TOTAL '+(scopeNode?.nombre||scopeNode?.code||''); scopePct=scopeNode?scopeNode.pctActas:null; scopeDelta=deltaVotos(scopeNode); }
+    if(path.length){ scopeNode=byCode[path[path.length-1].code]; scopeName='TOTAL '+(scopeNode?.nombre||scopeNode?.code||''); scopePct=covPct(scopeNode); scopeDelta=deltaVotos(scopeNode); }
     else { const blk=ambito===1?s.peru:s.exterior; scopeName=ambito===1?'TOTAL Perú':'TOTAL Exterior'; scopePct=blk?totView(blk.totales).pct:null;
       scopeNode = { code:'', nombre:scopeName, pctActas:scopePct, candidatos: blk? candList(blk.candidatos) : [] };
       scopeDelta=null; if(hasPrev){ scopeDelta=0; regs.filter(r=>r.ambito===ambito&&r.level==='dep').forEach(r=>{ const dd=deltaVotos(r); if(dd!=null) scopeDelta+=dd; }); } }
@@ -552,32 +566,47 @@ function detalleGeoSection(s){
 }
 
 function ultimosVotosSection(){
-  const sec=el('section'); sec.innerHTML='<h2>Últimos votos llegaron de…</h2>';
+  const sec=el('section'); sec.innerHTML='<h2>De dónde llegaron los votos · corte por corte</h2>';
   const v2=SNAPS.filter(s=>Array.isArray(s.regiones)&&s.regiones.length);
-  if(v2.length<2){ const p=el('p','note'); p.textContent='Necesito ≥2 cortes con detalle por región para ver de dónde llegaron los votos.'; sec.appendChild(p); return sec; }
-  const win=v2.slice(-5), first=win[0], last=win[win.length-1];
+  if(v2.length<2){ const p=el('p','note'); p.textContent='Necesito ≥2 cortes con detalle por región para ver de dónde llegaron los votos entre ellos.'; sec.appendChild(p); return sec; }
   const depMap=s=>{ const m={}; s.regiones.filter(r=>r.level==='dep').forEach(r=>{
       const reales=(r.candidatos||[]).filter(c=>!c.especial);
       const o={nombre:r.nombre, ambito:r.ambito, total:0, byCand:{}};
       reales.forEach(c=>{ const k=shortName(c); o.byCand[k]=(o.byCand[k]||0)+(c.votos||0); o.total+=(c.votos||0); });
       m[r.code]=o; }); return m; };
-  const A=depMap(first), B=depMap(last);
-  const build=(ambito)=> Object.keys(B).filter(code=>B[code].ambito===ambito).map(code=>{
-      const dTotal=(B[code].total||0)-((A[code]&&A[code].total)||0);
-      const cands={}; Object.keys(B[code].byCand).forEach(nm=>{ cands[nm]=(B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0); });
-      return {code, nombre:B[code].nombre, dTotal, cands};
-    }).filter(r=>r.dTotal>0).sort((x,y)=>y.dTotal-x.dTotal).slice(0,8);
-  const span=`${win.length} cortes · ${first.capturedAt.slice(11,16)} → ${last.capturedAt.slice(11,16)} UTC`;
-  const sgn=v=>v==null?'—':(v>=0?'+':'')+fmt(v);
+  const sgn=v=>v==null||v===0?(v===0?'0':'—'):(v>0?'+':'')+fmt(v);
   const tbl=(title, rows)=> !rows.length
-    ? `<div class="note" style="margin:8px 0 2px">${title}: sin votos nuevos en la ventana.</div>`
-    : `<div class="eyebrow" style="margin:12px 0 4px">${title} · +${fmt(rows.reduce((a,r)=>a+r.dTotal,0))} votos nuevos</div>
+    ? `<div class="note" style="margin:6px 0 2px">${title}: sin votos nuevos.</div>`
+    : `<div class="eyebrow" style="margin:10px 0 4px">${title} · +${fmt(rows.reduce((a,r)=>a+r.dTotal,0))} votos</div>
        <table><thead><tr><th>Región</th><th class="num">+ votos</th><th class="num">→ Sánchez</th><th class="num">→ Fujimori</th></tr></thead>
        <tbody>${rows.map(r=>`<tr><td>${esc(r.nombre||r.code)}</td><td class="num up">+${fmt(r.dTotal)}</td>
          <td class="num">${sgn(r.cands['Sánchez'])}</td><td class="num">${sgn(r.cands['Fujimori'])}</td></tr>`).join('')}</tbody></table>`;
-  const box=el('div','margin');
-  box.innerHTML=`<div class="note" style="margin:0 0 4px">Ventana: ${span}</div>`+ tbl('Perú', build(1)) + tbl('Exterior', build(2));
-  sec.appendChild(box);
+
+  const intro=el('p','note'); intro.style.margin='0 0 8px';
+  intro.textContent=`${v2.length} cortes cargados · ${v2.length-1} transiciones. Cada bloque compara un corte con el inmediatamente anterior. El más reciente abre desplegado.`;
+  sec.appendChild(intro);
+
+  // una transición por cada par consecutivo, de la más reciente a la más antigua
+  for(let i=v2.length-1; i>=1; i--){
+    const prev=v2[i-1], curr=v2[i];
+    const A=depMap(prev), B=depMap(curr);
+    const build=(ambito)=> Object.keys(B).filter(code=>B[code].ambito===ambito).map(code=>{
+        const dTotal=(B[code].total||0)-((A[code]&&A[code].total)||0);
+        const cands={}; Object.keys(B[code].byCand).forEach(nm=>{ cands[nm]=(B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0); });
+        return {code, nombre:B[code].nombre, dTotal, cands};
+      }).filter(r=>r.dTotal>0).sort((x,y)=>y.dTotal-x.dTotal).slice(0,8);
+    const peru=build(1), ext=build(2);
+    // neto por candidato en toda la transición (todas las regiones, no solo top)
+    let net={}, totNuevos=0;
+    Object.keys(B).forEach(code=>{ const d=(B[code].total||0)-((A[code]&&A[code].total)||0); if(d>0) totNuevos+=d;
+      Object.keys(B[code].byCand).forEach(nm=>{ net[nm]=(net[nm]||0)+((B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0)); }); });
+    const t0=limaHM(prev.capturedAt), t1=limaHM(curr.capturedAt);
+    const head=`${t0} → ${t1} · +${fmt(totNuevos)} votos · Sánchez ${sgn(net['Sánchez'])} / Fujimori ${sgn(net['Fujimori'])}`;
+    const d=el('details'); if(i===v2.length-1) d.open=true;
+    d.innerHTML=`<summary>${head}</summary>`+ tbl('Perú', peru) + tbl('Exterior', ext);
+    d.style.margin='6px 0'; d.style.borderTop='1px solid var(--line)'; d.style.paddingTop='6px';
+    sec.appendChild(d);
+  }
   return sec;
 }
 
