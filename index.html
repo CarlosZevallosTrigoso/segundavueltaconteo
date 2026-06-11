@@ -569,9 +569,13 @@ function ultimosVotosSection(){
   const sec=el('section'); sec.innerHTML='<h2>De dónde llegaron los votos · corte por corte</h2>';
   const v2=SNAPS.filter(s=>Array.isArray(s.regiones)&&s.regiones.length);
   if(v2.length<2){ const p=el('p','note'); p.textContent='Necesito ≥2 cortes con detalle por región para ver de dónde llegaron los votos entre ellos.'; sec.appendChild(p); return sec; }
-  const depMap=s=>{ const m={}; s.regiones.filter(r=>r.level==='dep').forEach(r=>{
+
+  // nombres por código (del corte más reciente, el más completo) para etiquetar el padre
+  const nameByCode={}; v2[v2.length-1].regiones.forEach(r=>nameByCode[r.code]=r.nombre);
+
+  const regMap=(s,level)=>{ const m={}; s.regiones.filter(r=>r.level===level).forEach(r=>{
       const reales=(r.candidatos||[]).filter(c=>!c.especial);
-      const o={nombre:r.nombre, ambito:r.ambito, total:0, byCand:{}};
+      const o={nombre:r.nombre, ambito:r.ambito, parent:r.parent||null, total:0, byCand:{}};
       reales.forEach(c=>{ const k=shortName(c); o.byCand[k]=(o.byCand[k]||0)+(c.votos||0); o.total+=(c.votos||0); });
       m[r.code]=o; }); return m; };
   const sgn=v=>v==null||v===0?(v===0?'0':'—'):(v>0?'+':'')+fmt(v);
@@ -579,34 +583,45 @@ function ultimosVotosSection(){
     ? `<div class="note" style="margin:6px 0 2px">${title}: sin votos nuevos.</div>`
     : `<div class="eyebrow" style="margin:10px 0 4px">${title} · +${fmt(rows.reduce((a,r)=>a+r.dTotal,0))} votos</div>
        <table><thead><tr><th>Región</th><th class="num">+ votos</th><th class="num">→ Sánchez</th><th class="num">→ Fujimori</th></tr></thead>
-       <tbody>${rows.map(r=>`<tr><td>${esc(r.nombre||r.code)}</td><td class="num up">+${fmt(r.dTotal)}</td>
+       <tbody>${rows.map(r=>`<tr><td>${esc(r.nombre||r.code)}${r.parentName?` <span class="pll">${esc(r.parentName)}</span>`:''}</td><td class="num up">+${fmt(r.dTotal)}</td>
          <td class="num">${sgn(r.cands['Sánchez'])}</td><td class="num">${sgn(r.cands['Fujimori'])}</td></tr>`).join('')}</tbody></table>`;
 
+  let level='dep';
+  const niv={1:{dep:'Departamentos',prov:'Provincias',dist:'Distritos'},2:{dep:'Continentes',prov:'Países',dist:'Ciudades'}};
   const intro=el('p','note'); intro.style.margin='0 0 8px';
-  intro.textContent=`${v2.length} cortes cargados · ${v2.length-1} transiciones. Cada bloque compara un corte con el inmediatamente anterior. El más reciente abre desplegado.`;
+  intro.textContent=`${v2.length} cortes cargados · ${v2.length-1} transiciones. Cada bloque compara un corte con el inmediatamente anterior. El más reciente abre desplegado. El total y el neto de cada corte no cambian con el nivel (cada nivel es una partición completa); solo cambia el desglose.`;
   sec.appendChild(intro);
+  const ctl=el('div'); ctl.style.cssText='margin:0 0 8px';
+  ctl.innerHTML=`<div class="tabs" data-g="lvl"><button data-l="dep" class="on">Departamento · Continente</button><button data-l="prov">Provincia · País</button><button data-l="dist">Distrito · Ciudad</button></div>`;
+  sec.appendChild(ctl);
+  const blocks=el('div'); sec.appendChild(blocks);
 
-  // una transición por cada par consecutivo, de la más reciente a la más antigua
-  for(let i=v2.length-1; i>=1; i--){
-    const prev=v2[i-1], curr=v2[i];
-    const A=depMap(prev), B=depMap(curr);
-    const build=(ambito)=> Object.keys(B).filter(code=>B[code].ambito===ambito).map(code=>{
-        const dTotal=(B[code].total||0)-((A[code]&&A[code].total)||0);
-        const cands={}; Object.keys(B[code].byCand).forEach(nm=>{ cands[nm]=(B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0); });
-        return {code, nombre:B[code].nombre, dTotal, cands};
-      }).filter(r=>r.dTotal>0).sort((x,y)=>y.dTotal-x.dTotal).slice(0,8);
-    const peru=build(1), ext=build(2);
-    // neto por candidato en toda la transición (todas las regiones, no solo top)
-    let net={}, totNuevos=0;
-    Object.keys(B).forEach(code=>{ const d=(B[code].total||0)-((A[code]&&A[code].total)||0); if(d>0) totNuevos+=d;
-      Object.keys(B[code].byCand).forEach(nm=>{ net[nm]=(net[nm]||0)+((B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0)); }); });
-    const t0=limaHM(prev.capturedAt), t1=limaHM(curr.capturedAt);
-    const head=`${t0} → ${t1} · +${fmt(totNuevos)} votos · Sánchez ${sgn(net['Sánchez'])} / Fujimori ${sgn(net['Fujimori'])}`;
-    const d=el('details'); if(i===v2.length-1) d.open=true;
-    d.innerHTML=`<summary>${head}</summary>`+ tbl('Perú', peru) + tbl('Exterior', ext);
-    d.style.margin='6px 0'; d.style.borderTop='1px solid var(--line)'; d.style.paddingTop='6px';
-    sec.appendChild(d);
+  function renderAll(){
+    blocks.innerHTML='';
+    for(let i=v2.length-1; i>=1; i--){
+      const prev=v2[i-1], curr=v2[i];
+      const A=regMap(prev,level), B=regMap(curr,level);
+      const build=(ambito)=> Object.keys(B).filter(code=>B[code].ambito===ambito).map(code=>{
+          const dTotal=(B[code].total||0)-((A[code]&&A[code].total)||0);
+          const cands={}; Object.keys(B[code].byCand).forEach(nm=>{ cands[nm]=(B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0); });
+          const parentName = (level!=='dep' && B[code].parent)? (nameByCode[B[code].parent]||null) : null;
+          return {code, nombre:B[code].nombre, parentName, dTotal, cands};
+        }).filter(r=>r.dTotal>0).sort((x,y)=>y.dTotal-x.dTotal).slice(0,8);
+      const peru=build(1), ext=build(2);
+      let net={}, totNuevos=0;
+      Object.keys(B).forEach(code=>{ const d=(B[code].total||0)-((A[code]&&A[code].total)||0); if(d>0) totNuevos+=d;
+        Object.keys(B[code].byCand).forEach(nm=>{ net[nm]=(net[nm]||0)+((B[code].byCand[nm]||0)-((A[code]&&A[code].byCand[nm])||0)); }); });
+      const t0=limaHM(prev.capturedAt), t1=limaHM(curr.capturedAt);
+      const head=`${t0} → ${t1} · +${fmt(totNuevos)} votos · Sánchez ${sgn(net['Sánchez'])} / Fujimori ${sgn(net['Fujimori'])}`;
+      const d=el('details'); if(i===v2.length-1) d.open=true;
+      d.innerHTML=`<summary>${head}</summary>`+ tbl('Perú · '+niv[1][level].toLowerCase(), peru) + tbl('Exterior · '+niv[2][level].toLowerCase(), ext);
+      d.style.margin='6px 0'; d.style.borderTop='1px solid var(--line)'; d.style.paddingTop='6px';
+      blocks.appendChild(d);
+    }
   }
+  ctl.querySelector('[data-g="lvl"]').onclick=e=>{ const b=e.target.closest('button'); if(!b)return;
+    ctl.querySelectorAll('[data-g="lvl"] button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); level=b.dataset.l; renderAll(); };
+  renderAll();
   return sec;
 }
 
